@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BBQ Monitor</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div id="banner" class="banner hidden">
+    <span id="banner-msg"></span>
+    <button class="banner-close" onclick="closeBanner()">✕</button>
+  </div>
+
+  <header>
+    <div class="header-inner">
+      <div class="brand">
+        <span class="brand-icon">🔥</span>
+        <span class="brand-name">BBQ Monitor</span>
+      </div>
+      <div class="unit-switch">
+        <button id="btn-c" class="unit-btn active" onclick="setUnit('C')">°C</button>
+        <button id="btn-f" class="unit-btn" onclick="setUnit('F')">°F</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="probes-grid">
+
+      <!-- Meat probe card -->
+      <div class="card probe-card" id="meat-card">
+        <div class="probe-header">
+          <span class="probe-label">MEAT</span>
+          <span class="status-pill" id="meat-pill"></span>
+        </div>
+        <div class="probe-readout">
+          <span class="probe-temp" id="meat-temp">--</span>
+          <span class="probe-unit" id="meat-unit">°C</span>
+        </div>
+        <div class="progress-row">
+          <div class="progress-track">
+            <div class="progress-fill" id="meat-progress-fill"></div>
+          </div>
+          <span class="progress-pct" id="meat-progress-pct">0%</span>
+        </div>
+        <div class="probe-footer">
+          <span class="probe-meta" id="meat-target-label">Target --</span>
+          <span class="eta-badge" id="eta-badge" data-state="idle">ETA --</span>
+        </div>
+      </div>
+
+      <!-- Grill probe card -->
+      <div class="card probe-card" id="grill-card">
+        <div class="probe-header">
+          <span class="probe-label">GRILL</span>
+          <span class="status-pill" id="grill-badge">READING</span>
+        </div>
+        <div class="probe-readout">
+          <span class="probe-temp" id="grill-temp">--</span>
+          <span class="probe-unit" id="grill-unit">°C</span>
+        </div>
+        <div class="probe-footer" style="margin-top: auto;">
+          <span class="probe-meta" id="grill-range-label">Range --</span>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Chart -->
+    <div class="card chart-card">
+      <div class="chart-header">
+        <span class="chart-title">Temperature History</span>
+        <span class="chart-sub">Last 60 min</span>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="chart"></canvas>
+      </div>
+    </div>
+
+    <!-- Settings -->
+    <div class="card settings-card">
+      <h2 class="settings-title">Targets</h2>
+      <div class="settings-rows">
+        <div class="setting-row">
+          <label for="s-meat">Meat target</label>
+          <div class="input-wrap">
+            <input type="number" id="s-meat" value="74">
+            <span class="input-unit" id="s-meat-unit">°C</span>
+          </div>
+        </div>
+        <div class="setting-row">
+          <label for="s-grill-low">Grill low</label>
+          <div class="input-wrap">
+            <input type="number" id="s-grill-low" value="160">
+            <span class="input-unit" id="s-grill-low-unit">°C</span>
+          </div>
+        </div>
+        <div class="setting-row">
+          <label for="s-grill-high">Grill high</label>
+          <div class="input-wrap">
+            <input type="number" id="s-grill-high" value="200">
+            <span class="input-unit" id="s-grill-high-unit">°C</span>
+          </div>
+        </div>
+      </div>
+      <button class="btn-update" id="btn-update" onclick="applySettings()">Update Targets</button>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
