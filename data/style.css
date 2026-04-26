@@ -408,7 +408,7 @@ main > * {
   background: none;
   border: none;
   color: var(--text);
-  font-size: 15px;
+  font-size: 16px; /* must be ≥16px to prevent iOS Safari focus-zoom */
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   padding: 8px 10px;
