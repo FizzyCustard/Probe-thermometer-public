@@ -107,7 +107,7 @@ function initChart() {
       datasets: chartDatasets(),
     },
     options: {
-      responsive: true,
+      responsive: false,
       maintainAspectRatio: false,
       animation: false,
       interaction: { mode: 'index', intersect: false },
@@ -180,8 +180,7 @@ function rebuildChart() {
   chart.options.plugins.tooltip.callbacks.label =
     ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}${unitLabel()}`;
 
-  chart.update('none'); // no animation — keeps resize instantaneous
-  chart.resize();       // snap canvas back to container size before iOS notices
+  chart.update('none');
 }
 
 function appendChartPoint(meatC, grillC) {
@@ -374,6 +373,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
   buildHistory();
   initChart();
+
+  // Set canvas to container size so Chart.js doesn't start at zero
+  const wrap = document.querySelector('.chart-wrap');
+  chart.canvas.style.width  = wrap.clientWidth  + 'px';
+  chart.canvas.style.height = wrap.clientHeight + 'px';
+  chart.resize();
+
+  // Debounced resize — fires only after layout settles (>iOS keyboard animation)
+  let resizeTimer;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => chart.resize(), 400);
+  });
+
   tick();
   setInterval(tick, 1000);
 });

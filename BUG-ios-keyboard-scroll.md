@@ -1,7 +1,7 @@
 # Bug: Horizontal Scroll Triggered by iOS Keyboard on BBQ Monitor UI
 
 ## Status
-Open — root cause identified, fix not yet implemented.
+Fixed — `responsive: false` + debounced resize listener implemented in `data/app.js`.
 
 ## Environment
 - Device: iPhone (iOS Safari)
