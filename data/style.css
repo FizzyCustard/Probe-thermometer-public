@@ -16,7 +16,8 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 html {
-  overflow-x: hidden;
+  overflow-x: hidden; /* fallback */
+  overflow-x: clip;   /* clip without creating a scroll container — fixes sticky+iOS */
   width: 100%;
   position: relative;
 }
@@ -77,6 +78,8 @@ body {
 header {
   position: sticky;
   top: 0;
+  width: 100%;
+  overflow: hidden;
   background: rgba(10, 10, 10, 0.88);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
