@@ -18,6 +18,7 @@
 html {
   overflow-x: hidden;
   width: 100%;
+  position: relative;
 }
 
 body {
@@ -28,6 +29,8 @@ body {
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
   width: 100%;
+  max-width: 100%;
+  position: relative;
 }
 
 /* ── Banner ─────────────────────────────────────── */
@@ -141,6 +144,13 @@ main {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+main > * {
+  min-width: 0;
+  max-width: 100%;
 }
 
 /* ── Cards ───────────────────────────────────────── */
@@ -150,17 +160,21 @@ main {
   border: 1px solid var(--border);
   border-radius: 18px;
   padding: 20px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 /* ── Probe grid ──────────────────────────────────── */
 
 .probes-grid {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
+  min-width: 0;
 }
 @media (min-width: 540px) {
-  .probes-grid { grid-template-columns: 1fr 1fr; }
+  .probes-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 }
 
 /* ── Probe card ──────────────────────────────────── */
@@ -338,6 +352,14 @@ main {
 .chart-wrap {
   position: relative;
   height: 230px;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.chart-wrap canvas {
+  max-width: 100% !important;
+  width: 100% !important;
 }
 
 /* ── Settings ────────────────────────────────────── */
