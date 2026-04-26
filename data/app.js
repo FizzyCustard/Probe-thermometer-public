@@ -161,15 +161,27 @@ function initChart() {
 }
 
 function rebuildChart() {
+  const { meatTarget, grillLow, grillHigh } = settings;
   const bounds = chartYBounds();
+  const len = meatHistory.length;
+
+  // Update in-place so Chart.js doesn't tear down and recreate dataset
+  // objects, which triggers a full resize cycle that can overshoot on iOS
   chart.data.labels = meatHistory.map(d => timeLabel(d.ts));
-  chart.data.datasets = chartDatasets();
+  chart.data.datasets[0].data = meatHistory.map(d => toDisplay(d.c));
+  chart.data.datasets[1].data = grillHistory.map(d => toDisplay(d.c));
+  chart.data.datasets[2].data = Array(len).fill(toDisplay(meatTarget));
+  chart.data.datasets[3].data = Array(len).fill(toDisplay(grillLow));
+  chart.data.datasets[4].data = Array(len).fill(toDisplay(grillHigh));
+
   chart.options.scales.y.min = bounds.min;
   chart.options.scales.y.max = bounds.max;
   chart.options.scales.y.ticks.callback = v => v + unitLabel();
   chart.options.plugins.tooltip.callbacks.label =
     ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}${unitLabel()}`;
-  chart.update();
+
+  chart.update('none'); // no animation — keeps resize instantaneous
+  chart.resize();       // snap canvas back to container size before iOS notices
 }
 
 function appendChartPoint(meatC, grillC) {
