@@ -289,3 +289,17 @@ Any device on the same WiFi network opens `http://<device-ip>` in a browser. No 
 | Perfboard + wire | ~£3 |
 | Project enclosure | ~£5 |
 | **Total additional spend** | **~£16** |
+
+
+Gravity: I2C ADS1115 16-Bit ADC Module
+- https://thepihut.com/products/gravity-i2c-ads1115-16-bit-adc-module-arduino-raspberry-pi-compatible
+- Sale price £14.90
+
+Fermion: MicroSD Card Module for Arduino (Breakout)
+- £5
+- https://thepihut.com/products/microsd-card-module-for-arduino
+
+3.5mm 1/8" Stereo Audio Jack Terminal Block
+- https://thepihut.com/products/3-5mm-1-8-stereo-audio-jack-terminal-block
+- £2.40
+
