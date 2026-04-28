@@ -583,4 +583,5 @@ function calculateCoeffs(probe) {
     const btn = document.getElementById(`cal-${probe}-calc`);
     btn.textContent = 'Saved ✓';
     setTimeout(() => { btn.textContent = 'Calculate & Save'; }, 2500);
+  }
 }
