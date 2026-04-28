@@ -308,6 +308,20 @@ function setUnit(u) {
   }
 }
 
+// ── Settings sheet ───────────────────────────────────────────────────────────
+
+function openSettings() {
+  document.getElementById('settings-sheet').classList.add('open');
+  document.getElementById('settings-sheet').setAttribute('aria-hidden', 'false');
+  document.getElementById('settings-overlay').classList.add('open');
+}
+
+function closeSettings() {
+  document.getElementById('settings-sheet').classList.remove('open');
+  document.getElementById('settings-sheet').setAttribute('aria-hidden', 'true');
+  document.getElementById('settings-overlay').classList.remove('open');
+}
+
 // ── Settings ─────────────────────────────────────────────────────────────────
 
 function syncSettingsInputs() {

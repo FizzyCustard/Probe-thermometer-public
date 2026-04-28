@@ -80,8 +80,22 @@
       </div>
     </div>
 
-    <!-- Settings -->
-    <div class="card settings-card">
+  </main>
+
+  <!-- Settings button (fixed bottom) -->
+  <div class="settings-btn-wrap">
+    <button class="settings-btn" onclick="openSettings()">⚙ Settings</button>
+  </div>
+
+  <!-- Overlay -->
+  <div id="settings-overlay" class="settings-overlay" onclick="closeSettings()"></div>
+
+  <!-- Bottom sheet -->
+  <div id="settings-sheet" class="settings-sheet" aria-hidden="true">
+    <div class="sheet-handle"></div>
+    <div class="sheet-scroll">
+
+      <!-- Targets -->
       <h2 class="settings-title">Targets</h2>
       <div class="settings-rows">
         <div class="setting-row">
@@ -107,12 +121,13 @@
         </div>
       </div>
       <button class="btn-update" id="btn-update" onclick="applySettings()">Update Targets</button>
-    </div>
 
-    <!-- Calibration -->
-    <div class="card cal-card">
+      <!-- Divider -->
+      <div class="sheet-divider"></div>
+
+      <!-- Calibration -->
       <button class="cal-header" onclick="toggleCal()" aria-expanded="false" id="cal-toggle-btn">
-        <span class="settings-title">Probe Calibration</span>
+        <span class="cal-header-title">Probe Calibration</span>
         <span class="cal-chevron" id="cal-chevron">▾</span>
       </button>
       <div class="cal-body" id="cal-body" hidden>
@@ -198,9 +213,9 @@
           </div>
         </div>
       </div>
-    </div>
 
-  </main>
+    </div>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="app.js"></script>
