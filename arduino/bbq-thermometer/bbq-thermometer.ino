@@ -26,7 +26,7 @@ unsigned long lastLog       = 0;
 AsyncWebServer server(80);
 AsyncWebSocket  ws("/ws");
 Adafruit_ADS1115 ads;
-WiFiUdp   ntpUDP;
+WiFiUDP   ntpUDP;
 NTPClient timeClient(ntpUDP, NTP_SERVER, NTP_UTC_OFFSET_SEC, 60000);
 
 // ── Timestamp helpers ─────────────────────────────────────────────────────────
@@ -116,20 +116,24 @@ void loop() {
 
   unsigned long now = millis();
 
+  // Read each channel once and reuse for debug, broadcast, and logging
+  float rMeat  = PROBE0_ENABLED ? readResistance(ADS1115_CH_MEAT)  : -1.0f;
+  float rGrill = PROBE1_ENABLED ? readResistance(ADS1115_CH_GRILL) : -1.0f;
+  float tMeat  = (rMeat  > 500.0f && rMeat  < 2000000.0f) ? resistanceToCelsius(rMeat,  ADS1115_CH_MEAT)  : NAN;
+  float tGrill = (rGrill > 500.0f && rGrill < 2000000.0f) ? resistanceToCelsius(rGrill, ADS1115_CH_GRILL) : NAN;
+
   // Push live readings to all connected browsers
   if (now - lastBroadcast >= BROADCAST_INTERVAL_MS) {
     lastBroadcast = now;
-    wsBroadcast(readCelsius(ADS1115_CH_MEAT),
-                readCelsius(ADS1115_CH_GRILL),
-                getTimestamp());
+    Serial.printf("[MEAT]  R=%10.0f Ω  T=%.1f°C\n", rMeat,  tMeat);
+    Serial.printf("[GRILL] R=%10.0f Ω  T=%.1f°C\n", rGrill, tGrill);
+    wsBroadcast(tMeat, tGrill, getTimestamp());
   }
 
   // Append CSV row to SD card
   if (now - lastLog >= LOG_INTERVAL_MS) {
     lastLog = now;
     logReading(getTodayFilename(getDateStr()),
-               getTimestamp(),
-               readCelsius(ADS1115_CH_MEAT),
-               readCelsius(ADS1115_CH_GRILL));
+               getTimestamp(), tMeat, tGrill);
   }
 }

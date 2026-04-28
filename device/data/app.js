@@ -9,36 +9,6 @@ let meatHistory = []; // { ts: Date, c: number }
 let grillHistory = [];
 let alertFired = false;
 let chart;
-let simElapsed = 0; // seconds from "now" (history covers -3600 to 0)
-
-// ── Simulation ──────────────────────────────────────────────────────────────
-//
-// History starts 60 min ago. At t=0 (now), meat is ~48°C heading to 74°C.
-// Grill hovers around 178°C with natural fluctuation, occasionally leaving
-// the 160–200°C window so we can see the warning states.
-
-function simMeat(s) {
-  const minElapsed = 60 + s / 60; // 0 at start of cook, 60 at "now"
-  const base = Math.min(18 + minElapsed * 0.5, 74);
-  const noise = Math.sin(s * 0.08) * 0.5 + Math.cos(s * 0.15) * 0.3;
-  return Math.round((base + noise) * 10) / 10;
-}
-
-function simGrill(s) {
-  const slow  = Math.sin(s * 0.010) * 18;
-  const med   = Math.cos(s * 0.035) * 8;
-  const noise = Math.sin(s * 0.100) * 2;
-  return Math.round((178 + slow + med + noise) * 10) / 10;
-}
-
-function buildHistory() {
-  const now = Date.now();
-  for (let s = -3600; s <= 0; s += 30) {
-    const ts = new Date(now + s * 1000);
-    meatHistory.push({ ts, c: simMeat(s) });
-    grillHistory.push({ ts, c: simGrill(s) });
-  }
-}
 
 // ── Display helpers ─────────────────────────────────────────────────────────
 
@@ -222,62 +192,78 @@ function calcETA(currentC) {
 function updateUI(meatC, grillC) {
   const { meatTarget, grillLow, grillHigh } = settings;
 
-  // Temperatures
-  document.getElementById('meat-temp').textContent = fmt(meatC);
-  document.getElementById('grill-temp').textContent = fmt(grillC);
-  document.getElementById('meat-unit').textContent = unitLabel();
-  document.getElementById('grill-unit').textContent = unitLabel();
+  // ── Meat probe ──
+  if (meatC != null) {
+    document.getElementById('meat-temp').textContent = fmt(meatC);
+    document.getElementById('meat-unit').textContent = unitLabel();
 
-  // Progress bar (meat only)
-  const startC = 18;
-  const pct = Math.min(100, Math.max(0, (meatC - startC) / (meatTarget - startC) * 100));
-  document.getElementById('meat-progress-fill').style.width = pct.toFixed(1) + '%';
-  document.getElementById('meat-progress-pct').textContent = Math.round(pct) + '%';
+    const startC = 18;
+    const pct = Math.min(100, Math.max(0, (meatC - startC) / (meatTarget - startC) * 100));
+    document.getElementById('meat-progress-fill').style.width = pct.toFixed(1) + '%';
+    document.getElementById('meat-progress-pct').textContent = Math.round(pct) + '%';
 
-  // ETA
-  const etaEl = document.getElementById('eta-badge');
-  if (meatC >= meatTarget) {
-    etaEl.textContent = 'Done!';
-    etaEl.dataset.state = 'done';
+    const etaEl = document.getElementById('eta-badge');
+    if (meatC >= meatTarget) {
+      etaEl.textContent = 'Done!';
+      etaEl.dataset.state = 'done';
+    } else {
+      const eta = calcETA(meatC);
+      etaEl.textContent = eta === null ? 'ETA --' : eta < 1 ? 'ETA < 1 min' : `ETA ${eta} min`;
+      etaEl.dataset.state = 'active';
+    }
+
+    document.getElementById('meat-target-label').textContent = `Target ${fmtWithUnit(meatTarget)}`;
+
+    const meatCard = document.getElementById('meat-card');
+    if (meatC >= meatTarget && !alertFired) {
+      alertFired = true;
+      meatCard.classList.add('state-reached');
+      document.getElementById('meat-pill').textContent = 'TARGET REACHED';
+      document.getElementById('meat-pill').className = 'status-pill reached';
+      showBanner('Target temperature reached — time to check the meat!');
+    }
   } else {
-    const eta = calcETA(meatC);
-    etaEl.textContent = eta === null ? 'ETA --' : eta < 1 ? 'ETA < 1 min' : `ETA ${eta} min`;
-    etaEl.dataset.state = 'active';
+    document.getElementById('meat-temp').textContent = '--';
+    document.getElementById('meat-unit').textContent = '';
+    document.getElementById('meat-progress-fill').style.width = '0%';
+    document.getElementById('meat-progress-pct').textContent = '0%';
+    document.getElementById('eta-badge').textContent = 'ETA --';
+    document.getElementById('eta-badge').dataset.state = 'idle';
+    document.getElementById('meat-target-label').textContent = 'No probe';
+    document.getElementById('meat-pill').textContent = '';
+    document.getElementById('meat-pill').className = 'status-pill';
   }
 
-  // Meat footer label
-  document.getElementById('meat-target-label').textContent = `Target ${fmtWithUnit(meatTarget)}`;
-
-  // Meat reached alert
-  const meatCard = document.getElementById('meat-card');
-  if (meatC >= meatTarget && !alertFired) {
-    alertFired = true;
-    meatCard.classList.add('state-reached');
-    document.getElementById('meat-pill').textContent = 'TARGET REACHED';
-    document.getElementById('meat-pill').className = 'status-pill reached';
-    showBanner('Target temperature reached — time to check the meat!');
-  }
-
-  // Grill status
+  // ── Grill probe ──
   const grillCard  = document.getElementById('grill-card');
   const grillBadge = document.getElementById('grill-badge');
-  if (grillC < grillLow) {
-    grillBadge.textContent = 'TOO LOW';
-    grillBadge.className   = 'status-pill warning';
-    grillCard.className    = 'card probe-card state-warning';
-  } else if (grillC > grillHigh) {
-    grillBadge.textContent = 'TOO HIGH';
-    grillBadge.className   = 'status-pill warning';
-    grillCard.className    = 'card probe-card state-warning';
-  } else {
-    grillBadge.textContent = 'IN RANGE';
-    grillBadge.className   = 'status-pill ok';
-    grillCard.className    = 'card probe-card';
-  }
+  if (grillC != null) {
+    document.getElementById('grill-temp').textContent = fmt(grillC);
+    document.getElementById('grill-unit').textContent = unitLabel();
 
-  // Grill range label
-  document.getElementById('grill-range-label').textContent =
-    `Range ${fmt(grillLow, 0)}–${fmt(grillHigh, 0)}${unitLabel()}`;
+    if (grillC < grillLow) {
+      grillBadge.textContent = 'TOO LOW';
+      grillBadge.className   = 'status-pill warning';
+      grillCard.className    = 'card probe-card state-warning';
+    } else if (grillC > grillHigh) {
+      grillBadge.textContent = 'TOO HIGH';
+      grillBadge.className   = 'status-pill warning';
+      grillCard.className    = 'card probe-card state-warning';
+    } else {
+      grillBadge.textContent = 'IN RANGE';
+      grillBadge.className   = 'status-pill ok';
+      grillCard.className    = 'card probe-card';
+    }
+    document.getElementById('grill-range-label').textContent =
+      `Range ${fmt(grillLow, 0)}–${fmt(grillHigh, 0)}${unitLabel()}`;
+  } else {
+    document.getElementById('grill-temp').textContent = '--';
+    document.getElementById('grill-unit').textContent = '';
+    grillBadge.textContent = 'NO PROBE';
+    grillBadge.className   = 'status-pill';
+    grillCard.className    = 'card probe-card';
+    document.getElementById('grill-range-label').textContent = 'No probe';
+  }
 }
 
 // ── Banner ──────────────────────────────────────────────────────────────────
@@ -306,6 +292,20 @@ function setUnit(u) {
     const g = grillHistory[grillHistory.length - 1].c;
     updateUI(m, g);
   }
+}
+
+// ── Settings sheet ───────────────────────────────────────────────────────────
+
+function openSettings() {
+  document.getElementById('settings-sheet').classList.add('open');
+  document.getElementById('settings-sheet').setAttribute('aria-hidden', 'false');
+  document.getElementById('settings-overlay').classList.add('open');
+}
+
+function closeSettings() {
+  document.getElementById('settings-sheet').classList.remove('open');
+  document.getElementById('settings-sheet').setAttribute('aria-hidden', 'true');
+  document.getElementById('settings-overlay').classList.remove('open');
 }
 
 // ── Settings ─────────────────────────────────────────────────────────────────
@@ -348,87 +348,143 @@ function applySettings() {
 
 // ── WebSocket (live device) ──────────────────────────────────────────────────
 
-let wsSocket     = null;
-let wsConnected  = false;
-let lastChartAdd = 0;
+let wsSocket       = null;
+let connState      = 'offline'; // 'live' | 'stale' | 'offline'
+let lastChartAdd   = 0;
+let lastMessageTs  = 0;
+let reconnectTimer = null;
+let reconnectStep  = 0;
+let offlineSince   = 0;
+let bannerShown    = false;
+const RECONNECT_DELAYS_MS = [2000, 4000, 8000, 16000, 30000];
+const STALE_THRESHOLD_MS  = 5000;
+const BANNER_THRESHOLD_MS = 15000;
 const pendingCalTemp = { meat: [null, null, null], grill: [null, null, null] };
 
-function setConnectionState(live) {
-  wsConnected = live;
+function isLive() { return connState === 'live'; }
+
+function setConnState(state) {
+  if (state === connState) return;
+  connState = state;
+
+  const pill = document.getElementById('connection-pill');
+  if (pill) {
+    pill.classList.toggle('live',    state === 'live');
+    pill.classList.toggle('stale',   state === 'stale');
+    pill.classList.toggle('offline', state === 'offline');
+    pill.textContent =
+      state === 'live'  ? 'LIVE' :
+      state === 'stale' ? 'STALE · TAP TO RECONNECT' :
+                          'OFFLINE · TAP TO RECONNECT';
+  }
+
+  document.body.classList.toggle('app-stale', state !== 'live');
+
+  if (state === 'offline') {
+    if (offlineSince === 0) offlineSince = Date.now();
+  } else {
+    offlineSince = 0;
+    if (bannerShown) { closeBanner(); bannerShown = false; }
+  }
+}
+
+function setPillReconnecting() {
   const pill = document.getElementById('connection-pill');
   if (!pill) return;
-  pill.textContent = live ? 'LIVE' : 'DEMO';
-  pill.classList.toggle('live', live);
+  pill.textContent = 'RECONNECTING…';
+}
+
+function scheduleReconnect() {
+  clearTimeout(reconnectTimer);
+  const delay = RECONNECT_DELAYS_MS[Math.min(reconnectStep, RECONNECT_DELAYS_MS.length - 1)];
+  reconnectStep++;
+  reconnectTimer = setTimeout(connectWS, delay);
+}
+
+function manualReconnect() {
+  clearTimeout(reconnectTimer);
+  reconnectStep = 0;
+  if (wsSocket && wsSocket.readyState !== WebSocket.CLOSED) {
+    try { wsSocket.close(); } catch {}
+  }
+  setPillReconnecting();
+  connectWS();
 }
 
 function connectWS() {
   try {
     wsSocket = new WebSocket(`ws://${location.host}/ws`);
-  } catch (e) { return; }
+  } catch (e) {
+    scheduleReconnect();
+    return;
+  }
+  setPillReconnecting();
 
   wsSocket.addEventListener('open', () => {
-    setConnectionState(true);
-    // Sync current targets to device on connect
+    reconnectStep = 0;
+    lastMessageTs = Date.now();
+    setConnState('live');
     sendSettings();
   });
 
   wsSocket.addEventListener('message', e => {
+    lastMessageTs = Date.now();
+    setConnState('live');
+
     let data;
     try { data = JSON.parse(e.data); } catch { return; }
 
     if (data.type === 'cal_reading') { handleCalReading(data); return; }
     if (data.type === 'cal_saved')   { handleCalSaved(data);   return; }
 
-    // Temperature broadcast from firmware
-    const meatC  = parseFloat(data.meat.c);
-    const grillC = parseFloat(data.grill.c);
+    if (!data.meat || !data.grill) return;
+
+    // Temperature broadcast from firmware (null = probe not connected)
+    const meatC  = data.meat.c  != null ? parseFloat(data.meat.c)  : null;
+    const grillC = data.grill.c != null ? parseFloat(data.grill.c) : null;
     const now    = Date.now();
 
-    // Add a chart point every 30 s
+    // Add a chart point every 30 s (only for connected probes)
     if (now - lastChartAdd >= 30000) {
       lastChartAdd = now;
       const ts = new Date();
-      meatHistory.push({ ts, c: meatC });
-      grillHistory.push({ ts, c: grillC });
-      if (meatHistory.length > 240) { meatHistory.shift(); grillHistory.shift(); }
+      if (meatC  != null) meatHistory.push({ ts, c: meatC });
+      if (grillC != null) grillHistory.push({ ts, c: grillC });
+      if (meatHistory.length  > 240) meatHistory.shift();
+      if (grillHistory.length > 240) grillHistory.shift();
       appendChartPoint(meatC, grillC);
     }
 
     updateUI(meatC, grillC);
   });
 
-  wsSocket.addEventListener('close',  () => { setConnectionState(false); setTimeout(connectWS, 3000); });
-  wsSocket.addEventListener('error',  () => { /* close fires next */ });
+  wsSocket.addEventListener('close', () => {
+    setConnState('offline');
+    scheduleReconnect();
+  });
+  wsSocket.addEventListener('error', () => { /* close fires next */ });
+}
+
+function tickConnState() {
+  const now = Date.now();
+  if (connState === 'live' && now - lastMessageTs > STALE_THRESHOLD_MS) {
+    setConnState('stale');
+  }
+  if (connState === 'offline' && !bannerShown
+      && offlineSince && now - offlineSince >= BANNER_THRESHOLD_MS) {
+    showBanner('Lost connection to device — tap the pill to reconnect.');
+    bannerShown = true;
+  }
 }
 
 function sendSettings() {
-  if (!wsConnected || !wsSocket) return;
+  if (!isLive() || !wsSocket) return;
   wsSocket.send(JSON.stringify({
     type:        'settings',
     meat_target: settings.meatTarget,
     grill_low:   settings.grillLow,
     grill_high:  settings.grillHigh,
   }));
-}
-
-// ── Main simulation tick ─────────────────────────────────────────────────────
-
-function tick() {
-  if (wsConnected) return;   // live mode: firmware drives updates via WebSocket
-
-  simElapsed += 1;
-  const meatC  = simMeat(simElapsed);
-  const grillC = simGrill(simElapsed);
-
-  if (simElapsed % 30 === 0) {
-    const ts = new Date();
-    meatHistory.push({ ts, c: meatC });
-    grillHistory.push({ ts, c: grillC });
-    if (meatHistory.length > 240) { meatHistory.shift(); grillHistory.shift(); }
-    appendChartPoint(meatC, grillC);
-  }
-
-  updateUI(meatC, grillC);
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────────
@@ -438,7 +494,6 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-f').classList.toggle('active', unit === 'F');
   if (unit === 'F') syncSettingsInputs();
 
-  buildHistory();
   initChart();
 
   const wrap = document.querySelector('.chart-wrap');
@@ -452,10 +507,8 @@ document.addEventListener('DOMContentLoaded', () => {
     resizeTimer = setTimeout(() => chart.resize(), 400);
   });
 
-  // Attempt live device connection; simulation runs as fallback
   connectWS();
-  tick();
-  setInterval(tick, 1000);
+  setInterval(tickConnState, 1000);
 });
 
 // ── Calibration ──────────────────────────────────────────────────────────────
@@ -464,11 +517,6 @@ const calState = {
   meat:  [null, null, null],
   grill: [null, null, null],
 };
-
-function simResistance(tempC) {
-  const R0 = 100000, B = 3950, T0 = 298.15;
-  return R0 * Math.exp(B * (1 / (tempC + 273.15) - 1 / T0));
-}
 
 function calcSHCoeffs(points) {
   const [p1, p2, p3] = points;
@@ -501,20 +549,17 @@ function recordPoint(probe, index) {
   btn.textContent = 'Reading…';
   btn.disabled = true;
 
-  if (wsConnected && wsSocket) {
-    // Live mode — ask the firmware to read the ADC right now
-    pendingCalTemp[probe][index] = tempC;
-    wsSocket.send(JSON.stringify({
-      type:  'cal_read',
-      probe: probe === 'meat' ? 0 : 1,
-      point: index,
-    }));
-  } else {
-    // Demo mode — simulate a plausible resistance
-    const resistance = simResistance(tempC);
-    calState[probe][index] = { tempC, resistance };
-    updateCalPointUI(probe, index, resistance);
+  if (!isLive() || !wsSocket) {
+    btn.textContent = 'Not connected';
+    btn.disabled = false;
+    return;
   }
+  pendingCalTemp[probe][index] = tempC;
+  wsSocket.send(JSON.stringify({
+    type:  'cal_read',
+    probe: probe === 'meat' ? 0 : 1,
+    point: index,
+  }));
 }
 
 function updateCalPointUI(probe, index, resistance) {
@@ -556,7 +601,7 @@ function calculateCoeffs(probe) {
   document.getElementById(`cal-${probe}-C`).textContent = C.toExponential(4);
   document.getElementById(`cal-${probe}-result`).classList.remove('hidden');
 
-  if (wsConnected && wsSocket) {
+  if (isLive() && wsSocket) {
     wsSocket.send(JSON.stringify({
       type:      'cal_save',
       probe:     probe === 'meat' ? 0 : 1,
@@ -564,9 +609,5 @@ function calculateCoeffs(probe) {
       points:    points.map(p => ({ temp_c: p.tempC, resistance: p.resistance })),
       timestamp: new Date().toISOString(),
     }));
-  } else {
-    // Demo mode — no device to save to, just show confirmation
-    const btn = document.getElementById(`cal-${probe}-calc`);
-    btn.textContent = 'Saved ✓';
-    setTimeout(() => { btn.textContent = 'Calculate & Save'; }, 2500);
+  }
 }

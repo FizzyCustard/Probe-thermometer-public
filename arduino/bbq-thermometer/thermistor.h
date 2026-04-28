@@ -50,8 +50,13 @@ float resistanceToCelsius(float resistance, uint8_t probeIndex) {
 }
 
 // Convenience: read a channel and return °C directly.
+// Returns NAN (serialises as JSON null) when disabled or no probe detected.
 float readCelsius(uint8_t channel) {
-  return resistanceToCelsius(readResistance(channel), channel);
+  if (channel == 0 && !PROBE0_ENABLED) return NAN;
+  if (channel == 1 && !PROBE1_ENABLED) return NAN;
+  float r = readResistance(channel);
+  if (r < 500.0f || r > 2000000.0f) return NAN;
+  return resistanceToCelsius(r, channel);
 }
 
 // Returns true if the probe appears to be connected.

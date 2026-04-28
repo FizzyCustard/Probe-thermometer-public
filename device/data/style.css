@@ -119,11 +119,32 @@ header {
   border-radius: 20px;
   background: rgba(255,255,255,0.07);
   color: var(--text-muted);
+  border: none;
+  font-family: inherit;
   align-self: center;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, transform 0.05s;
 }
+.connection-pill:active { transform: scale(0.96); }
 .connection-pill.live {
   background: var(--success-dim);
   color: var(--success);
+  cursor: default;
+}
+.connection-pill.live:active { transform: none; }
+.connection-pill.stale {
+  background: rgba(255,200,74,0.15);
+  color: rgba(255,200,74,1);
+}
+.connection-pill.offline {
+  background: rgba(255,77,141,0.15);
+  color: var(--primary);
+}
+
+body.app-stale .probe-temp,
+body.app-stale .probe-unit {
+  opacity: 0.4;
+  transition: opacity 0.2s;
 }
 
 /* Unit switch */
@@ -158,7 +179,7 @@ main {
   max-width: min(820px, 95%);
   width: 100%;
   margin: 0 auto;
-  padding: 20px 16px 56px;
+  padding: 20px 16px 96px;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -380,6 +401,91 @@ main > * {
   width: 100% !important;
 }
 
+/* ── Settings button (fixed bottom) ─────────────── */
+
+.settings-btn-wrap {
+  position: fixed;
+  bottom: 24px;
+  left: 0; right: 0;
+  display: flex;
+  justify-content: center;
+  z-index: 90;
+  pointer-events: none;
+}
+.settings-btn {
+  pointer-events: all;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 13px 28px;
+  border-radius: 28px;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+}
+.settings-btn:hover { border-color: var(--primary); color: var(--primary); }
+.settings-btn:active { transform: scale(0.97); }
+
+/* ── Settings overlay ────────────────────────────── */
+
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 300;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+.settings-overlay.open {
+  opacity: 1;
+  pointer-events: all;
+}
+
+/* ── Bottom sheet ────────────────────────────────── */
+
+.settings-sheet {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  z-index: 400;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  border-radius: 20px 20px 0 0;
+  max-height: 85vh;
+  transform: translateY(100%);
+  transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+  display: flex;
+  flex-direction: column;
+}
+.settings-sheet.open { transform: translateY(0); }
+
+.sheet-handle {
+  width: 36px;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  margin: 12px auto 0;
+  flex-shrink: 0;
+}
+.sheet-scroll {
+  overflow-y: auto;
+  padding: 20px 20px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  -webkit-overflow-scrolling: touch;
+}
+.sheet-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 24px 0 8px;
+}
+
 /* ── Settings ────────────────────────────────────── */
 
 .settings-title {
@@ -459,8 +565,6 @@ main > * {
 
 /* ── Calibration ─────────────────────────────────────── */
 
-.cal-card { padding: 0; overflow: hidden; }
-
 .cal-header {
   width: 100%;
   background: none;
@@ -468,12 +572,19 @@ main > * {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 20px;
+  padding: 12px 0;
   cursor: pointer;
   color: var(--text);
   text-align: left;
 }
-.cal-header:hover .settings-title { color: var(--primary); }
+
+.cal-header-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.02em;
+}
+.cal-header:hover .cal-header-title { color: var(--primary); }
 
 .cal-chevron {
   font-size: 14px;
@@ -482,7 +593,7 @@ main > * {
 }
 
 .cal-body {
-  padding: 0 20px 20px;
+  padding: 4px 0 8px;
   display: flex;
   flex-direction: column;
   gap: 24px;

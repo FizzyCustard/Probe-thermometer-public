@@ -60,7 +60,7 @@ bool saveCalibration(uint8_t probeIndex,
                      float t3c, float r3,
                      String timestamp) {
   // Read existing file so we don't overwrite the other probe's data
-  StaticJsonDocument<1024> doc;
+  JsonDocument doc;
   if (SD.exists(CAL_FILE)) {
     File f = SD.open(CAL_FILE, FILE_READ);
     if (f) { deserializeJson(doc, f); f.close(); }
@@ -68,18 +68,18 @@ bool saveCalibration(uint8_t probeIndex,
 
   char key[8];
   snprintf(key, sizeof(key), "probe%d", probeIndex);
-  JsonObject probe = doc.createNestedObject(key);
+  JsonObject probe = doc[key].to<JsonObject>();
   probe["A"] = coeffs.A;
   probe["B"] = coeffs.B;
   probe["C"] = coeffs.C;
   probe["calibrated"] = timestamp;
 
-  JsonArray points = probe.createNestedArray("points");
-  JsonObject p1 = points.createNestedObject();
+  JsonArray points = probe["points"].to<JsonArray>();
+  JsonObject p1 = points.add<JsonObject>();
   p1["temp_c"] = t1c; p1["resistance"] = r1;
-  JsonObject p2 = points.createNestedObject();
+  JsonObject p2 = points.add<JsonObject>();
   p2["temp_c"] = t2c; p2["resistance"] = r2;
-  JsonObject p3 = points.createNestedObject();
+  JsonObject p3 = points.add<JsonObject>();
   p3["temp_c"] = t3c; p3["resistance"] = r3;
 
   SD.remove(CAL_FILE);
@@ -98,7 +98,7 @@ void loadCalibration() {
   File f = SD.open(CAL_FILE, FILE_READ);
   if (!f) return;
 
-  StaticJsonDocument<1024> doc;
+  JsonDocument doc;
   if (deserializeJson(doc, f) != DeserializationError::Ok) { f.close(); return; }
   f.close();
 

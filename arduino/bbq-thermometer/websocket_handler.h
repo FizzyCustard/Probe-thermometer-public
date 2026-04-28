@@ -13,7 +13,7 @@ extern float grillHigh;
 // ── Inbound message handler ───────────────────────────────────────────────────
 
 void onWsMessage(AsyncWebSocketClient* client, String msg) {
-  StaticJsonDocument<512> doc;
+  JsonDocument doc;
   if (deserializeJson(doc, msg) != DeserializationError::Ok) return;
 
   const char* type = doc["type"] | "";
@@ -40,7 +40,7 @@ void onWsMessage(AsyncWebSocketClient* client, String msg) {
     if (probe > 1) return;
 
     float r = readResistance(probe);
-    StaticJsonDocument<128> resp;
+    JsonDocument resp;
     resp["type"]       = "cal_reading";
     resp["probe"]      = probe;
     resp["point"]      = point;
@@ -85,7 +85,7 @@ void onWsMessage(AsyncWebSocketClient* client, String msg) {
 
     bool saved = saveCalibration(probe, c, t1, r1, t2, r2, t3, r3, ts);
 
-    StaticJsonDocument<64> resp;
+    JsonDocument resp;
     resp["type"]  = "cal_saved";
     resp["probe"] = probe;
     resp["saved"] = saved;
@@ -134,7 +134,7 @@ void wsBegin(AsyncWebServer* server) {
 void wsBroadcast(float meatC, float grillC, String timestamp) {
   if (ws.count() == 0) return;
 
-  StaticJsonDocument<256> doc;
+  JsonDocument doc;
   doc["ts"]          = timestamp;
   doc["meat"]["c"]   = meatC;
   doc["grill"]["c"]  = grillC;

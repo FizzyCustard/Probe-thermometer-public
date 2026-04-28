@@ -80,12 +80,12 @@ Key values to set:
 
 | SD Pin | D1 Mini Pin |
 |---|---|
-| VCC | 3.3V |
+| +5V | 5V (module has onboard 3.3V regulator + level shifters) |
 | GND | GND |
-| CLK | D5 (GPIO14) |
+| SCK | D5 (GPIO14) |
 | MISO | D6 (GPIO12) |
 | MOSI | D7 (GPIO13) |
-| CS | D8 (GPIO15) |
+| SS (CS) | D8 (GPIO15) |
 
 ### Probe Voltage Divider (per probe)
 
@@ -298,6 +298,23 @@ or `pio run --target uploadfs` (PlatformIO).
 
 The `device/data/` folder is the copy of the web UI intended for the ESP8266.
 The `data/` folder at the repo root is the Netlify demo site — keep it separate.
+
+### Combined firmware + filesystem upload
+
+Firmware lives in one flash partition; the LittleFS web UI lives in another.
+A normal `pio run -t upload` only flashes firmware, so frontend changes in
+`device/data/` would otherwise stay stale on the device.
+
+`scripts/upload_all.py` is wired in via `extra_scripts` in `platformio.ini`
+and registers a post-action on the `upload` target that runs `uploadfs`
+immediately after the firmware flash. After this:
+
+- `pio run -t upload` (and the PIO IDE Upload button) flash **both**
+  partitions in one go — firmware first, LittleFS second.
+- `pio run -t uploadfs` on its own still works for FS-only iteration.
+
+To opt out for a firmware-only flash (rare), comment out the `extra_scripts`
+line in `platformio.ini` for that run.
 
 ---
 
