@@ -441,3 +441,152 @@ main > * {
 }
 .btn-update:hover  { opacity: 0.88; }
 .btn-update:active { transform: scale(0.98); }
+
+/* ── Calibration ─────────────────────────────────────── */
+
+.cal-card { padding: 0; overflow: hidden; }
+
+.cal-header {
+  width: 100%;
+  background: none;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px;
+  cursor: pointer;
+  color: var(--text);
+  text-align: left;
+}
+.cal-header:hover .settings-title { color: var(--primary); }
+
+.cal-chevron {
+  font-size: 14px;
+  color: var(--text-muted);
+  transition: transform 0.2s;
+}
+
+.cal-body {
+  padding: 0 20px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.cal-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin-top: -8px;
+}
+
+.cal-probe {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cal-probe-label {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
+.cal-points {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cal-point-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cal-pt-num {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  width: 14px;
+  flex-shrink: 0;
+}
+
+.cal-temp-wrap { flex-shrink: 0; }
+.cal-temp-wrap input { width: 56px; }
+
+.btn-record {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 7px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: border-color 0.2s, color 0.2s;
+}
+.btn-record:hover  { border-color: var(--primary); color: var(--primary); }
+.btn-record.recorded {
+  border-color: var(--success);
+  color: var(--success);
+  background: var(--success-dim);
+}
+
+.cal-resistance {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.btn-calculate {
+  margin-top: 4px;
+  padding: 10px 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  align-self: flex-start;
+}
+.btn-calculate:not(:disabled):hover {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+.btn-calculate:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.cal-coeffs {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+  padding: 10px 14px;
+  background: var(--surface-2);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+.cal-coeffs.hidden { display: none; }
+
+.cal-coeff-item {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.cal-coeff-item span {
+  color: var(--success);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}

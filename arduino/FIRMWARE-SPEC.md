@@ -16,10 +16,12 @@
 ```
 arduino/
   bbq-thermometer/
-    bbq-thermometer.ino   Main sketch — WiFi, server, loop
-    thermistor.h          Steinhart-Hart resistance → temperature
-    logger.h              SD card CSV logging
-    websocket_handler.h   WebSocket push and receive
+    config.example.h    Template — copy to config.h and fill in credentials
+    config.h            Your values — gitignored, never committed
+    bbq-thermometer.ino Main sketch — WiFi, server, loop
+    thermistor.h        Steinhart-Hart resistance → temperature + calibration
+    logger.h            SD card CSV logging + calibration JSON save/load
+    websocket_handler.h WebSocket push and receive (settings + calibration)
 ```
 
 ---
@@ -44,6 +46,19 @@ Install all via Arduino IDE Library Manager or `platformio.ini`.
 > GitHub — they are not in the standard Library Manager.
 > - https://github.com/me-no-dev/ESPAsyncWebServer
 > - https://github.com/me-no-dev/ESPAsyncTCP
+
+---
+
+## Configuration (`config.h`)
+
+Copy `config.example.h` to `config.h` before flashing. The file is
+gitignored so WiFi credentials are never committed.
+
+Key values to set:
+- `WIFI_SSID` / `WIFI_PASSWORD`
+- `NTP_UTC_OFFSET_SEC` (e.g. `3600` for GMT+1)
+- `PROBE1_SH_A/B/C` and `PROBE2_SH_A/B/C` — Steinhart-Hart defaults
+  (overridden at runtime when calibration data is saved to SD)
 
 ---
 
@@ -82,126 +97,174 @@ The 3.5mm jack Tip is the signal line; Sleeve is GND.
 
 ---
 
-## WiFi Configuration
-
-Credentials are defined as constants in `bbq-thermometer.ino`.
-Do not commit real credentials — use placeholder values and replace
-before flashing.
-
-```cpp
-const char* WIFI_SSID     = "YOUR_SSID";
-const char* WIFI_PASSWORD = "YOUR_PASSWORD";
-```
-
-The device connects as a WiFi client (station mode) and receives an
-IP via DHCP. The IP is printed to Serial on boot. Open
-`http://<device-ip>` in a browser on the same network.
-
-Future improvement: mDNS so the device is accessible at `http://bbq.local`.
-
----
-
 ## Thermistor Module (`thermistor.h`)
 
-Converts ADS1115 raw counts → resistance → temperature using the
-Steinhart-Hart B-parameter equation.
+### Equation
 
-**Probe specs (Morpilot NTC):**
-- Resistance at 25°C (R₀): 100,000 Ω
-- B-value: 3950 K
-- Supply voltage: 3.3V
-- Series resistor: 100,000 Ω
+Uses the **full 3-coefficient Steinhart-Hart equation** for best accuracy:
 
-**Equation:**
 ```
-R = R_series × (ADC_max / ADC_raw - 1)
-1/T = 1/T₀ + (1/B) × ln(R / R₀)
-T_celsius = T_kelvin - 273.15
+1/T(K) = A + B·ln(R) + C·(ln(R))³
 ```
 
-**ADS1115 settings:**
-- Gain: GAIN_ONE (±4.096V range) — gives ~0.125mV per count
-- Mode: continuous
-- Sample rate: 128 SPS (default)
-- ADC_max for gain ±4.096V = 32767 counts = 4.096V; scale to 3.3V
+This is more accurate than the simpler B-parameter equation (±0.1°C vs ±2°C
+over the calibrated range), especially important for the meat probe where
+hitting a precise target matters.
 
-**Functions to implement:**
-```cpp
-float readResistance(uint8_t channel);
-float resistanceTocelsius(float resistance);
-bool probeConnected(uint8_t channel);   // returns false if reading is open/short
+### ADC → Resistance
+
 ```
+R_ntc = R_series × V_adc / (V_supply − V_adc)
+```
+
+where `V_adc = (raw_counts / 32767) × 4.096` (ADS1115 GAIN_ONE).
+
+### Coefficient Storage
+
+`SHCoeffs probeCoeffs[2]` holds A/B/C for both probes. Populated from
+`config.h` defaults on boot; overwritten when `loadCalibration()` finds
+`/calibration.json` on the SD card.
+
+### Coefficient Calculation
+
+`calcSHCoeffs(t1c, r1, t2c, r2, t3c, r3, &out)` computes A/B/C from three
+known (temperature °C, resistance Ω) pairs using the standard algorithm:
+
+```
+gamma2 = (Y2−Y1)/(L2−L1)
+gamma3 = (Y3−Y1)/(L3−L1)
+C = (gamma3−gamma2) / ((L3−L2)·(L3+L2+L1))
+B = gamma2 − C·(L2²+L2·L1+L1²)
+A = Y1 − (B + C·L1²)·L1
+```
+
+where `Li = ln(Ri)`, `Yi = 1/Ti(K)`.
+
+> **Note:** coefficient calculation is also mirrored in `data/app.js`
+> (`calcSHCoeffs()`). The browser performs the calculation and sends the
+> result to the firmware, keeping the arithmetic off the ESP8266.
+
+### Default Coefficients
+
+Estimated values for a 100kΩ NTC B3950 (Morpilot probes):
+
+| Coefficient | Value |
+|---|---|
+| A | 4.475 × 10⁻⁴ |
+| B | 2.523 × 10⁻⁴ |
+| C | 1.701 × 10⁻⁹ |
+
+Run the calibration tool for probe-specific accuracy.
 
 ---
 
 ## Logger Module (`logger.h`)
 
-Appends temperature readings to a CSV file on the SD card.
+### Temperature CSV
 
-**File naming:** `/log_YYYY-MM-DD.csv` — new file per calendar day.
+- File: `/log_YYYY-MM-DD.csv` — new file per calendar day
+- Written every 5 seconds
+- Format: `timestamp,probe1_c,probe2_c`
 
-**CSV format:**
+### Calibration JSON (`/calibration.json`)
+
+Saved and loaded by the logger. Format:
+
+```json
+{
+  "probe0": {
+    "A": 4.475e-4, "B": 2.523e-4, "C": 1.701e-9,
+    "calibrated": "2025-07-14T14:30:00",
+    "points": [
+      {"temp_c": 0.0,   "resistance": 336400.0},
+      {"temp_c": 25.0,  "resistance": 100000.0},
+      {"temp_c": 100.0, "resistance": 6960.0}
+    ]
+  },
+  "probe1": { ... }
+}
 ```
-timestamp,probe1_c,probe2_c
-2025-07-14T14:32:05,67.4,182.3
-```
 
-**Write interval:** every 5 seconds.
-
-**Functions to implement:**
-```cpp
-bool loggerBegin();                                  // mount SD, open/create today's file
-void logReading(String timestamp, float p1, float p2);
-String getTodayFilename();                           // based on NTP date
-```
+`loadCalibration()` is called in `setup()` after `loggerBegin()`. If the
+file exists it overwrites `probeCoeffs[]` with the saved values.
 
 ---
 
 ## WebSocket Handler (`websocket_handler.h`)
 
-Handles bidirectional WebSocket communication between the ESP8266
-and the browser dashboard.
-
 ### Outbound (ESP8266 → browser, every 1 second)
-
-JSON payload pushed to all connected clients:
 
 ```json
 {
   "ts": "2025-07-14T14:32:05",
-  "meat": { "c": 67.4 },
+  "meat":  { "c": 67.4 },
   "grill": { "c": 182.3 },
   "meat_target": 74.0,
-  "grill_low": 160.0,
-  "grill_high": 200.0
+  "grill_low":   160.0,
+  "grill_high":  200.0
 }
 ```
 
-Temperature is always sent in °C. Unit conversion is done client-side
-in the browser.
+### Inbound: settings update
 
-### Inbound (browser → ESP8266)
+```json
+{ "type": "settings", "meat_target": 80.0, "grill_low": 150.0, "grill_high": 210.0 }
+```
 
-Settings update sent when user taps "Update Targets":
+### Inbound: calibration — read resistance
+
+Browser requests a live resistance reading on a probe channel:
+
+```json
+{ "type": "cal_read", "probe": 0 }
+```
+
+ESP8266 responds:
+
+```json
+{ "type": "cal_reading", "probe": 0, "resistance": 336400.0 }
+```
+
+### Inbound: calibration — save coefficients
+
+After all 3 points are recorded the browser calculates A/B/C and sends:
 
 ```json
 {
-  "type": "settings",
-  "meat_target": 80.0,
-  "grill_low": 150.0,
-  "grill_high": 210.0
+  "type": "cal_save",
+  "probe": 0,
+  "A": 4.475e-4, "B": 2.523e-4, "C": 1.701e-9,
+  "points": [
+    {"temp_c": 0.0,   "resistance": 336400.0},
+    {"temp_c": 25.0,  "resistance": 100000.0},
+    {"temp_c": 100.0, "resistance": 6960.0}
+  ],
+  "timestamp": "2025-07-14T14:30:00"
 }
 ```
 
-The firmware updates its in-memory settings and uses the new values
-for subsequent outbound payloads.
+ESP8266 applies the coefficients immediately, saves to SD, responds:
 
-**Functions to implement:**
-```cpp
-void wsBegin(AsyncWebServer* server);
-void wsBroadcast(float meatC, float grillC, String ts);
-void onWsMessage(AsyncWebSocketClient* client, String msg);
+```json
+{ "type": "cal_saved", "probe": 0, "saved": true }
 ```
+
+---
+
+## Calibration Workflow
+
+1. Open the web UI, expand the **Probe Calibration** section.
+2. For each probe, place it in three reference media at known temperatures.
+   Recommended points: **0°C** (ice water), **25°C** (room temp with a
+   reference thermometer), **100°C** (boiling water at sea level).
+3. Enter the known temperature, click **Record** — the browser sends a
+   `cal_read` message and displays the measured resistance.
+4. Once all 3 points are recorded, click **Calculate & Save**.
+   - Browser computes A/B/C using the Steinhart-Hart algorithm.
+   - Sends a `cal_save` message to the firmware.
+   - Firmware saves `/calibration.json` to SD and immediately starts
+     using the new coefficients.
+5. The calculated A/B/C values are shown on screen for reference.
 
 ---
 
@@ -214,81 +277,41 @@ void onWsMessage(AsyncWebSocketClient* client, String msg);
 3. Connect to WiFi — block until connected, print IP to Serial
 4. Sync time via NTP
 5. Initialise ADS1115 over I2C
-6. Initialise SD card logger
-7. Start AsyncWebServer on port 80
-8. Register WebSocket endpoint at `/ws`
-9. Register static file handler (serves LittleFS files for all other routes)
-10. Start server
+6. `loggerBegin()` — mount SD card
+7. `loadCalibration()` — load saved coefficients from SD if present
+8. `wsBegin(&server)` — register WebSocket endpoint at `/ws`
+9. Register static file handler (serves LittleFS for all other routes)
+10. Start server on port 80
 
 ### Main loop (`loop()`)
 
-- Every **1 second**: read both probes → broadcast JSON via WebSocket
-- Every **5 seconds**: append row to SD card CSV
-- Call `ws.cleanupClients()` every loop to remove stale connections
-
-### Settings (in-memory, not persisted in v1)
-
-```cpp
-float meatTarget = 74.0;
-float grillLow   = 160.0;
-float grillHigh  = 200.0;
-```
-
-Updated when a settings WebSocket message is received.
-Persisting across reboots (EEPROM/LittleFS) is a v2 task.
+- Every **1 second**: read both probes → `wsBroadcast()`
+- Every **5 seconds**: `logReading()` → append CSV row
+- Every loop: `ws.cleanupClients()`
 
 ---
 
 ## LittleFS — Web UI Files
 
-The `data/` folder at the project root contains the web UI files.
-These are uploaded to the ESP8266's onboard flash using the
-**LittleFS Upload Tool** for Arduino IDE or the PlatformIO
-`uploadfs` command.
+Upload the `data/` folder using the LittleFS Upload Tool (Arduino IDE)
+or `pio run --target uploadfs` (PlatformIO).
 
-Files uploaded:
-```
-data/index.html
-data/style.css
-data/app.js
-```
-
-Before uploading, `app.js` needs updating to connect via WebSocket
-instead of using the fake simulation data. See `BUG-ios-keyboard-scroll.md`
-for the open UI bug to resolve first.
-
----
-
-## Serial Debug Output
-
-Useful output to print during development:
-
-```
-BBQ Monitor booting...
-LittleFS mounted
-Connecting to WiFi...
-Connected! IP: 192.168.1.42
-NTP synced: 2025-07-14T14:30:00
-ADS1115 found at 0x48
-SD card mounted
-Server started
-Probe 1 (meat):  48.3°C
-Probe 2 (grill): 182.1°C
-WS client connected: 192.168.1.55
-Settings update received: target=80.0 low=150.0 high=210.0
-```
+Before uploading, update `data/app.js` to connect via WebSocket instead
+of using the simulation. See the open tasks below.
 
 ---
 
 ## Open Tasks
 
-- [ ] Implement `thermistor.h`
-- [ ] Implement `logger.h`
-- [ ] Implement `websocket_handler.h`
-- [ ] Implement `bbq-thermometer.ino` main sketch
+- [ ] Implement `bbq-thermometer.ino` boot sequence and main loop
+- [ ] Implement `readResistance()` in `thermistor.h`
+- [ ] Implement `readCelsius()` / `probeConnected()` wrappers
+- [ ] Implement `loggerBegin()` and `logReading()` in `logger.h`
+- [ ] Implement `wsBroadcast()` JSON serialisation in `websocket_handler.h`
+- [ ] Wire up NTP timestamp formatting
 - [ ] Update `data/app.js` to use real WebSocket instead of simulation
-- [ ] Fix iOS keyboard scroll bug (see `BUG-ios-keyboard-scroll.md`) before deploying UI to LittleFS
-- [ ] Test probe readings against a known temperature (ice water = 0°C, boiling = 100°C)
+- [ ] Fix iOS keyboard scroll bug (see `BUG-ios-keyboard-scroll.md`)
+- [ ] Test calibration end-to-end with real probes (ice water + boiling water)
 - [ ] Test SD logging over a full cook session
 - [ ] Add mDNS (`bbq.local`) — v2
-- [ ] Persist settings to EEPROM — v2
+- [ ] Persist target settings to EEPROM — v2

@@ -390,3 +390,93 @@ document.addEventListener('DOMContentLoaded', () => {
   tick();
   setInterval(tick, 1000);
 });
+
+// ── Calibration ──────────────────────────────────────────────────────────────
+//
+// In the real device, clicking "Record" sends a WebSocket message and waits
+// for the ESP8266 to reply with the measured resistance. In this demo the
+// resistance is simulated from the entered temperature using the B-parameter
+// equation (inverse NTC) so the workflow is visible without hardware.
+
+const calState = {
+  meat:  [null, null, null],   // each entry: { tempC, resistance } or null
+  grill: [null, null, null],
+};
+
+// Simulate resistance from temperature (demo only — real device reads the ADC)
+function simResistance(tempC) {
+  const R0 = 100000, B = 3950, T0 = 298.15;
+  return R0 * Math.exp(B * (1 / (tempC + 273.15) - 1 / T0));
+}
+
+// Calculate full Steinhart-Hart A, B, C from three (tempC, resistance) points
+function calcSHCoeffs(points) {
+  const [p1, p2, p3] = points;
+  const T1 = p1.tempC + 273.15, T2 = p2.tempC + 273.15, T3 = p3.tempC + 273.15;
+  const L1 = Math.log(p1.resistance), L2 = Math.log(p2.resistance), L3 = Math.log(p3.resistance);
+  const Y1 = 1 / T1, Y2 = 1 / T2, Y3 = 1 / T3;
+  const g2 = (Y2 - Y1) / (L2 - L1);
+  const g3 = (Y3 - Y1) / (L3 - L1);
+  const C = (g3 - g2) / ((L3 - L2) * (L3 + L2 + L1));
+  const B = g2 - C * (L2 * L2 + L2 * L1 + L1 * L1);
+  const A = Y1 - (B + C * L1 * L1) * L1;
+  return { A, B, C };
+}
+
+function toggleCal() {
+  const body    = document.getElementById('cal-body');
+  const chevron = document.getElementById('cal-chevron');
+  const btn     = document.getElementById('cal-toggle-btn');
+  const open    = body.hidden;
+  body.hidden   = !open;
+  chevron.textContent = open ? '▴' : '▾';
+  btn.setAttribute('aria-expanded', open);
+}
+
+function recordPoint(probe, index) {
+  const tInput = document.getElementById(`cal-${probe}-t${index + 1}`);
+  const tempC  = parseFloat(tInput.value);
+  if (isNaN(tempC)) return;
+
+  // Demo: simulate resistance. Real device: send WS message and await reply.
+  const resistance = simResistance(tempC);
+  calState[probe][index] = { tempC, resistance };
+
+  // Show resistance reading
+  document.getElementById(`cal-${probe}-r${index}`).textContent =
+    Math.round(resistance).toLocaleString() + ' Ω';
+
+  // Mark button as recorded
+  const btn = document.getElementById(`cal-${probe}-btn-${index}`);
+  btn.textContent = 'Recorded ✓';
+  btn.classList.add('recorded');
+
+  // Enable Calculate button once all 3 points are recorded
+  if (calState[probe].every(p => p !== null)) {
+    document.getElementById(`cal-${probe}-calc`).disabled = false;
+  }
+}
+
+function calculateCoeffs(probe) {
+  const points = calState[probe];
+  if (!points.every(p => p !== null)) return;
+
+  const { A, B, C } = calcSHCoeffs(points);
+
+  // Show coefficients
+  document.getElementById(`cal-${probe}-A`).textContent = A.toExponential(4);
+  document.getElementById(`cal-${probe}-B`).textContent = B.toExponential(4);
+  document.getElementById(`cal-${probe}-C`).textContent = C.toExponential(4);
+  document.getElementById(`cal-${probe}-result`).classList.remove('hidden');
+
+  // In the real device we'd send these to the ESP8266 via WebSocket:
+  // ws.send(JSON.stringify({ type: 'cal_save', probe: probe === 'meat' ? 0 : 1,
+  //   A, B, C, points, timestamp: new Date().toISOString() }))
+  //
+  // The firmware saves to /calibration.json on the SD card and starts using
+  // the new coefficients immediately.
+
+  const calcBtn = document.getElementById(`cal-${probe}-calc`);
+  calcBtn.textContent = 'Saved ✓';
+  setTimeout(() => { calcBtn.textContent = 'Calculate & Save'; }, 2500);
+}
