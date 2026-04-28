@@ -328,6 +328,7 @@ function applySettings() {
   settings.meatTarget = unit === 'F' ? fToC(rawMeat) : rawMeat;
   settings.grillLow   = unit === 'F' ? fToC(rawLow)  : rawLow;
   settings.grillHigh  = unit === 'F' ? fToC(rawHigh) : rawHigh;
+  sendSettings(); // push to device if connected
 
   // Reset meat alert so it can fire again against the new target
   alertFired = false;
@@ -345,9 +346,76 @@ function applySettings() {
   setTimeout(() => { btn.textContent = 'Update Targets'; }, 1800);
 }
 
+// ── WebSocket (live device) ──────────────────────────────────────────────────
+
+let wsSocket     = null;
+let wsConnected  = false;
+let lastChartAdd = 0;
+const pendingCalTemp = { meat: [null, null, null], grill: [null, null, null] };
+
+function setConnectionState(live) {
+  wsConnected = live;
+  const pill = document.getElementById('connection-pill');
+  if (!pill) return;
+  pill.textContent = live ? 'LIVE' : 'DEMO';
+  pill.classList.toggle('live', live);
+}
+
+function connectWS() {
+  try {
+    wsSocket = new WebSocket(`ws://${location.host}/ws`);
+  } catch (e) { return; }
+
+  wsSocket.addEventListener('open', () => {
+    setConnectionState(true);
+    // Sync current targets to device on connect
+    sendSettings();
+  });
+
+  wsSocket.addEventListener('message', e => {
+    let data;
+    try { data = JSON.parse(e.data); } catch { return; }
+
+    if (data.type === 'cal_reading') { handleCalReading(data); return; }
+    if (data.type === 'cal_saved')   { handleCalSaved(data);   return; }
+
+    // Temperature broadcast from firmware
+    const meatC  = parseFloat(data.meat.c);
+    const grillC = parseFloat(data.grill.c);
+    const now    = Date.now();
+
+    // Add a chart point every 30 s
+    if (now - lastChartAdd >= 30000) {
+      lastChartAdd = now;
+      const ts = new Date();
+      meatHistory.push({ ts, c: meatC });
+      grillHistory.push({ ts, c: grillC });
+      if (meatHistory.length > 240) { meatHistory.shift(); grillHistory.shift(); }
+      appendChartPoint(meatC, grillC);
+    }
+
+    updateUI(meatC, grillC);
+  });
+
+  wsSocket.addEventListener('close',  () => { setConnectionState(false); setTimeout(connectWS, 3000); });
+  wsSocket.addEventListener('error',  () => { /* close fires next */ });
+}
+
+function sendSettings() {
+  if (!wsConnected || !wsSocket) return;
+  wsSocket.send(JSON.stringify({
+    type:        'settings',
+    meat_target: settings.meatTarget,
+    grill_low:   settings.grillLow,
+    grill_high:  settings.grillHigh,
+  }));
+}
+
 // ── Main simulation tick ─────────────────────────────────────────────────────
 
 function tick() {
+  if (wsConnected) return;   // live mode: firmware drives updates via WebSocket
+
   simElapsed += 1;
   const meatC  = simMeat(simElapsed);
   const grillC = simGrill(simElapsed);
@@ -356,7 +424,6 @@ function tick() {
     const ts = new Date();
     meatHistory.push({ ts, c: meatC });
     grillHistory.push({ ts, c: grillC });
-    // Cap at 2 hours of history
     if (meatHistory.length > 240) { meatHistory.shift(); grillHistory.shift(); }
     appendChartPoint(meatC, grillC);
   }
@@ -374,42 +441,35 @@ document.addEventListener('DOMContentLoaded', () => {
   buildHistory();
   initChart();
 
-  // Set canvas to container size so Chart.js doesn't start at zero
   const wrap = document.querySelector('.chart-wrap');
   chart.canvas.style.width  = wrap.clientWidth  + 'px';
   chart.canvas.style.height = wrap.clientHeight + 'px';
   chart.resize();
 
-  // Debounced resize — fires only after layout settles (>iOS keyboard animation)
   let resizeTimer;
   window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => chart.resize(), 400);
   });
 
+  // Attempt live device connection; simulation runs as fallback
+  connectWS();
   tick();
   setInterval(tick, 1000);
 });
 
 // ── Calibration ──────────────────────────────────────────────────────────────
-//
-// In the real device, clicking "Record" sends a WebSocket message and waits
-// for the ESP8266 to reply with the measured resistance. In this demo the
-// resistance is simulated from the entered temperature using the B-parameter
-// equation (inverse NTC) so the workflow is visible without hardware.
 
 const calState = {
-  meat:  [null, null, null],   // each entry: { tempC, resistance } or null
+  meat:  [null, null, null],
   grill: [null, null, null],
 };
 
-// Simulate resistance from temperature (demo only — real device reads the ADC)
 function simResistance(tempC) {
   const R0 = 100000, B = 3950, T0 = 298.15;
   return R0 * Math.exp(B * (1 / (tempC + 273.15) - 1 / T0));
 }
 
-// Calculate full Steinhart-Hart A, B, C from three (tempC, resistance) points
 function calcSHCoeffs(points) {
   const [p1, p2, p3] = points;
   const T1 = p1.tempC + 273.15, T2 = p2.tempC + 273.15, T3 = p3.tempC + 273.15;
@@ -417,9 +477,9 @@ function calcSHCoeffs(points) {
   const Y1 = 1 / T1, Y2 = 1 / T2, Y3 = 1 / T3;
   const g2 = (Y2 - Y1) / (L2 - L1);
   const g3 = (Y3 - Y1) / (L3 - L1);
-  const C = (g3 - g2) / ((L3 - L2) * (L3 + L2 + L1));
-  const B = g2 - C * (L2 * L2 + L2 * L1 + L1 * L1);
-  const A = Y1 - (B + C * L1 * L1) * L1;
+  const C  = (g3 - g2) / ((L3 - L2) * (L3 + L2 + L1));
+  const B  = g2 - C * (L2 * L2 + L2 * L1 + L1 * L1);
+  const A  = Y1 - (B + C * L1 * L1) * L1;
   return { A, B, C };
 }
 
@@ -430,31 +490,59 @@ function toggleCal() {
   const open    = body.hidden;
   body.hidden   = !open;
   chevron.textContent = open ? '▴' : '▾';
-  btn.setAttribute('aria-expanded', open);
+  btn.setAttribute('aria-expanded', String(open));
 }
 
 function recordPoint(probe, index) {
-  const tInput = document.getElementById(`cal-${probe}-t${index + 1}`);
-  const tempC  = parseFloat(tInput.value);
+  const tempC = parseFloat(document.getElementById(`cal-${probe}-t${index + 1}`).value);
   if (isNaN(tempC)) return;
 
-  // Demo: simulate resistance. Real device: send WS message and await reply.
-  const resistance = simResistance(tempC);
-  calState[probe][index] = { tempC, resistance };
+  const btn = document.getElementById(`cal-${probe}-btn-${index}`);
+  btn.textContent = 'Reading…';
+  btn.disabled = true;
 
-  // Show resistance reading
+  if (wsConnected && wsSocket) {
+    // Live mode — ask the firmware to read the ADC right now
+    pendingCalTemp[probe][index] = tempC;
+    wsSocket.send(JSON.stringify({
+      type:  'cal_read',
+      probe: probe === 'meat' ? 0 : 1,
+      point: index,
+    }));
+  } else {
+    // Demo mode — simulate a plausible resistance
+    const resistance = simResistance(tempC);
+    calState[probe][index] = { tempC, resistance };
+    updateCalPointUI(probe, index, resistance);
+  }
+}
+
+function updateCalPointUI(probe, index, resistance) {
   document.getElementById(`cal-${probe}-r${index}`).textContent =
     Math.round(resistance).toLocaleString() + ' Ω';
-
-  // Mark button as recorded
   const btn = document.getElementById(`cal-${probe}-btn-${index}`);
   btn.textContent = 'Recorded ✓';
+  btn.disabled    = false;
   btn.classList.add('recorded');
-
-  // Enable Calculate button once all 3 points are recorded
   if (calState[probe].every(p => p !== null)) {
     document.getElementById(`cal-${probe}-calc`).disabled = false;
   }
+}
+
+function handleCalReading(data) {
+  // { type:'cal_reading', probe:0, point:0, resistance:336400 }
+  const probe = data.probe === 0 ? 'meat' : 'grill';
+  const index = data.point;
+  const tempC = pendingCalTemp[probe][index] ?? 0;
+  calState[probe][index] = { tempC, resistance: data.resistance };
+  updateCalPointUI(probe, index, data.resistance);
+}
+
+function handleCalSaved(data) {
+  const probe = data.probe === 0 ? 'meat' : 'grill';
+  const btn   = document.getElementById(`cal-${probe}-calc`);
+  btn.textContent = data.saved ? 'Saved to SD ✓' : 'Save failed ✗';
+  setTimeout(() => { btn.textContent = 'Calculate & Save'; }, 2500);
 }
 
 function calculateCoeffs(probe) {
@@ -463,20 +551,22 @@ function calculateCoeffs(probe) {
 
   const { A, B, C } = calcSHCoeffs(points);
 
-  // Show coefficients
   document.getElementById(`cal-${probe}-A`).textContent = A.toExponential(4);
   document.getElementById(`cal-${probe}-B`).textContent = B.toExponential(4);
   document.getElementById(`cal-${probe}-C`).textContent = C.toExponential(4);
   document.getElementById(`cal-${probe}-result`).classList.remove('hidden');
 
-  // In the real device we'd send these to the ESP8266 via WebSocket:
-  // ws.send(JSON.stringify({ type: 'cal_save', probe: probe === 'meat' ? 0 : 1,
-  //   A, B, C, points, timestamp: new Date().toISOString() }))
-  //
-  // The firmware saves to /calibration.json on the SD card and starts using
-  // the new coefficients immediately.
-
-  const calcBtn = document.getElementById(`cal-${probe}-calc`);
-  calcBtn.textContent = 'Saved ✓';
-  setTimeout(() => { calcBtn.textContent = 'Calculate & Save'; }, 2500);
+  if (wsConnected && wsSocket) {
+    wsSocket.send(JSON.stringify({
+      type:      'cal_save',
+      probe:     probe === 'meat' ? 0 : 1,
+      A, B, C,
+      points:    points.map(p => ({ temp_c: p.tempC, resistance: p.resistance })),
+      timestamp: new Date().toISOString(),
+    }));
+  } else {
+    // Demo mode — no device to save to, just show confirmation
+    const btn = document.getElementById(`cal-${probe}-calc`);
+    btn.textContent = 'Saved ✓';
+    setTimeout(() => { btn.textContent = 'Calculate & Save'; }, 2500);
 }

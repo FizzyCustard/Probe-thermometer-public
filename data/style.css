@@ -111,6 +111,21 @@ header {
   color: var(--text);
 }
 
+.connection-pill {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  padding: 2px 7px;
+  border-radius: 20px;
+  background: rgba(255,255,255,0.07);
+  color: var(--text-muted);
+  align-self: center;
+}
+.connection-pill.live {
+  background: var(--success-dim);
+  color: var(--success);
+}
+
 /* Unit switch */
 .unit-switch {
   display: flex;
