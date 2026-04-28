@@ -140,7 +140,7 @@ A = Y1 − (B + C·L1²)·L1
 
 where `Li = ln(Ri)`, `Yi = 1/Ti(K)`.
 
-> **Note:** coefficient calculation is also mirrored in `data/app.js`
+> **Note:** coefficient calculation is also mirrored in `device/data/app.js`
 > (`calcSHCoeffs()`). The browser performs the calculation and sends the
 > result to the firmware, keeping the arithmetic off the ESP8266.
 
@@ -293,24 +293,24 @@ ESP8266 applies the coefficients immediately, saves to SD, responds:
 
 ## LittleFS — Web UI Files
 
-Upload the `data/` folder using the LittleFS Upload Tool (Arduino IDE)
+Upload the `device/data/` folder using the LittleFS Upload Tool (Arduino IDE)
 or `pio run --target uploadfs` (PlatformIO).
 
-Before uploading, update `data/app.js` to connect via WebSocket instead
-of using the simulation. See the open tasks below.
+The `device/data/` folder is the copy of the web UI intended for the ESP8266.
+The `data/` folder at the repo root is the Netlify demo site — keep it separate.
 
 ---
 
 ## Open Tasks
 
-- [ ] Implement `bbq-thermometer.ino` boot sequence and main loop
-- [ ] Implement `readResistance()` in `thermistor.h`
-- [ ] Implement `readCelsius()` / `probeConnected()` wrappers
-- [ ] Implement `loggerBegin()` and `logReading()` in `logger.h`
-- [ ] Implement `wsBroadcast()` JSON serialisation in `websocket_handler.h`
-- [ ] Wire up NTP timestamp formatting
-- [ ] Update `data/app.js` to use real WebSocket instead of simulation
-- [ ] Fix iOS keyboard scroll bug (see `BUG-ios-keyboard-scroll.md`)
+- [x] Implement `bbq-thermometer.ino` boot sequence and main loop
+- [x] Implement `readResistance()` in `thermistor.h`
+- [x] Implement `readCelsius()` / `probeConnected()` wrappers
+- [x] Implement `loggerBegin()` and `logReading()` in `logger.h`
+- [x] Implement `wsBroadcast()` JSON serialisation in `websocket_handler.h`
+- [x] Wire up NTP timestamp formatting
+- [x] Web UI: WebSocket live mode with simulation fallback
+- [x] Fix iOS keyboard scroll bug (see `BUG-ios-keyboard-scroll.md`)
 - [ ] Test calibration end-to-end with real probes (ice water + boiling water)
 - [ ] Test SD logging over a full cook session
 - [ ] Add mDNS (`bbq.local`) — v2

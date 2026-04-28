@@ -148,7 +148,7 @@ Build and test in this order so you can catch problems early:
 
 6. **Full firmware** — flash `bbq-thermometer.ino`. Open Serial Monitor at 115200 baud to confirm each step of the boot sequence. Copy `config.h` from `config.example.h` first.
 
-7. **Web UI** — upload `data/` folder to LittleFS using the LittleFS upload plugin. Open `http://<IP>` in a browser and confirm the LIVE indicator appears.
+7. **Web UI** — upload `device/data/` folder to LittleFS using the LittleFS upload plugin. Open `http://<IP>` in a browser and confirm the LIVE indicator appears.
 
 ---
 
