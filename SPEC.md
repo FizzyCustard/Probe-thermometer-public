@@ -6,6 +6,13 @@ A wireless BBQ thermometer system built on an ESP8266 D1 Mini. Two NTC thermisto
 
 ---
 
+## Software
+
+- We want to make sure we are using coding best practices.
+- We have to make sure we are not going to have any techical debt
+- We should be proud of this code it should be seen as well thought out and put together projject
+---
+
 ## Hardware
 
 ### Core Board
