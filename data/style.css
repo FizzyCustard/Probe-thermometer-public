@@ -958,7 +958,7 @@ main > * {
   border: 1px solid var(--border);
   border-radius: 10px;
   color: var(--text);
-  font-size: 14px;
+  font-size: 16px; /* ≥16px prevents iOS Safari auto-zoom on focus */
   font-family: inherit;
   padding: 10px 12px;
   outline: none;
@@ -1410,7 +1410,7 @@ main > * {
   border: 1px solid var(--border);
   border-radius: 10px;
   color: var(--text);
-  font-size: 14px;
+  font-size: 16px; /* ≥16px prevents iOS Safari auto-zoom on focus */
   padding: 11px 12px;
   outline: none;
   font-family: inherit;
