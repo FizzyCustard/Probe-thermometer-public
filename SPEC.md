@@ -121,13 +121,68 @@ Where:
 
 ### SD Card Logging
 
-- File: `/log_YYYY-MM-DD.csv`
-- New file per day, appended across power cycles as long as RTC/NTP time is available.
-- Format:
+All data is written under a `/BBQ/` root folder on the SD card. This keeps the card organised and means a factory reset of the device never wipes historical data.
+
+#### Folder structure
 
 ```
-timestamp,probe1_c,probe2_c
+/BBQ/
+  logs/
+    log_2025-07-14.csv        ← rolling temperature log, one file per day
+    log_2025-07-15.csv
+  cooks/
+    cook_2025-07-14T08-14-00.csv  ← one file per cook session
+    cook_2025-07-14T19-05-00.csv
+  config/
+    settings.csv              ← last-saved targets (persists across reboots)
+    presets.csv               ← user-defined preset temperatures
+    favourites.csv            ← saved favourite cook configs
+```
+
+#### CSV formats
+
+**`/BBQ/logs/log_YYYY-MM-DD.csv`** — temperature log, appended every 5 s while device is on:
+```
+timestamp,meat_c,grill_c
 2025-07-14T14:32:05,67.4,182.3
+```
+
+**`/BBQ/cooks/cook_<ISO-datetime>.csv`** — one row per 30-second sample during an active cook session, plus header metadata rows prefixed with `#`:
+```
+#name,Sunday Brisket
+#preset,Brisket / pulled pork
+#meat_target_c,95
+#grill_low_c,105
+#grill_high_c,130
+#started_at,2025-07-14T08:14:00
+elapsed_s,meat_c,grill_c
+0,18.0,115.2
+30,18.3,118.6
+...
+#note,76m,Stall hit at 68°C. Spritzing with apple juice.
+#note,192m,Wrapped in butcher paper at 75°C.
+```
+
+**`/BBQ/config/settings.csv`** — single row, written on every target update so the last settings survive a reboot:
+```
+meat_target_c,grill_low_c,grill_high_c
+74,160,200
+```
+
+**`/BBQ/config/presets.csv`** — one row per preset, written when the user saves or deletes a preset:
+```
+name,meat_target_c
+Beef — rare,52
+Beef — medium rare,57
+Chicken — safe minimum,74
+Brisket / pulled pork,95
+```
+
+**`/BBQ/config/favourites.csv`** — one row per favourite, written on save/delete:
+```
+name,meat_target_c,grill_low_c,grill_high_c,preset
+Sunday Brisket,95,105,130,Brisket / pulled pork
+Reverse Sear Ribeye,54,110,130,Beef — medium rare
 ```
 
 ### WebSocket Payload (JSON, pushed every 1s)
@@ -233,10 +288,16 @@ Any device on the same WiFi network opens `http://<device-ip>` in a browser. No 
 ### SD Card (data logs)
 
 ```
-/
-  log_2025-07-14.csv
-  log_2025-07-15.csv
-  ...
+/BBQ/
+  logs/
+    log_2025-07-14.csv
+    log_2025-07-15.csv
+  cooks/
+    cook_2025-07-14T08-14-00.csv
+  config/
+    settings.csv
+    presets.csv
+    favourites.csv
 ```
 
 ### Firmware

@@ -217,15 +217,13 @@ function tickCookBar() {
 // ─────────────────────────────────────────────────────────────────────────
 
 function openStartCookDialog() {
-  const overlay = document.getElementById('start-cook-overlay');
-  overlay.classList.add('open');
-  // Pre-fill targets summary
-  const wrap = document.getElementById('start-targets-summary');
-  wrap.innerHTML = `
-    <div class="dialog-target-row"><span>Meat target</span><span>${fmtWithUnit(settings.meatTarget, 0)}</span></div>
-    <div class="dialog-target-row"><span>Grill range</span><span>${fmt(settings.grillLow,0)}–${fmtWithUnit(settings.grillHigh,0)}</span></div>
-    ${window.__cookState.preset ? `<div class="dialog-target-row"><span>Preset</span><span>${window.__cookState.preset}</span></div>` : ''}
-  `;
+  document.getElementById('start-cook-overlay').classList.add('open');
+  document.getElementById('start-meat-target').value = Math.round(unit === 'F' ? cToF(settings.meatTarget) : settings.meatTarget);
+  document.getElementById('start-grill-low').value   = Math.round(unit === 'F' ? cToF(settings.grillLow)   : settings.grillLow);
+  document.getElementById('start-grill-high').value  = Math.round(unit === 'F' ? cToF(settings.grillHigh)  : settings.grillHigh);
+  ['start-meat-unit', 'start-grill-low-unit', 'start-grill-high-unit'].forEach(id => {
+    document.getElementById(id).textContent = unitLabel();
+  });
   setTimeout(() => document.getElementById('start-cook-name').focus(), 200);
 }
 window.openStartCookDialog = openStartCookDialog;
@@ -238,6 +236,24 @@ window.closeStartCookDialog = closeStartCookDialog;
 function confirmStartCook() {
   const name = document.getElementById('start-cook-name').value.trim() || 'Cook';
   const note = document.getElementById('start-cook-note').value.trim();
+
+  // Apply targets from dialog inputs
+  const rawMeat = parseFloat(document.getElementById('start-meat-target').value);
+  const rawLow  = parseFloat(document.getElementById('start-grill-low').value);
+  const rawHigh = parseFloat(document.getElementById('start-grill-high').value);
+  if (![rawMeat, rawLow, rawHigh].some(isNaN)) {
+    settings.meatTarget = unit === 'F' ? fToC(rawMeat) : rawMeat;
+    settings.grillLow   = unit === 'F' ? fToC(rawLow)  : rawLow;
+    settings.grillHigh  = unit === 'F' ? fToC(rawHigh) : rawHigh;
+    syncSettingsInputs();
+  }
+
+  // Reset chart — fresh slate for this cook
+  meatHistory.length  = 0;
+  grillHistory.length = 0;
+  rebuildChart();
+  alertFired = false;
+
   const s = window.__cookState;
   s.active = true;
   s.startedAt = Date.now();
@@ -246,7 +262,7 @@ function confirmStartCook() {
     { ts: 0, text: `Started cook · target ${fmtWithUnit(settings.meatTarget, 0)} · grill ${fmt(settings.grillLow,0)}–${fmtWithUnit(settings.grillHigh,0)}${s.preset ? ` · ${s.preset}` : ''}`, system: true },
   ];
   if (note) s.notes.push({ ts: 0, text: note });
-  alertFired = false;
+
   closeStartCookDialog();
   renderCookBar();
   renderNotesCard();
@@ -445,8 +461,8 @@ function setView(view) {
   window.__cookState.view = view;
   document.getElementById('tab-live').classList.toggle('active', view === 'live');
   document.getElementById('tab-history').classList.toggle('active', view === 'history');
-  document.getElementById('view-live').style.display    = view === 'live' ? '' : 'none';
-  document.getElementById('view-history').style.display = view === 'history' ? '' : 'none';
+  document.getElementById('view-live').style.display    = view === 'live'    ? 'flex' : 'none';
+  document.getElementById('view-history').style.display = view === 'history' ? 'flex' : 'none';
   if (view === 'history') renderHistoryList();
 }
 window.setView = setView;

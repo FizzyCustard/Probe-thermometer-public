@@ -36,7 +36,7 @@
     </div>
 
     <!-- ── LIVE VIEW ──────────────────────────────────────────────── -->
-    <div id="view-live" style="display: contents;">
+    <div id="view-live" class="view-panel">
 
       <!-- Cook bar (Start/Stop, active cook info) -->
       <div class="cook-bar" id="cook-bar"></div>
@@ -110,7 +110,7 @@
     </div>
 
     <!-- ── HISTORY VIEW ────────────────────────────────────────────── -->
-    <div id="view-history" style="display: none;">
+    <div id="view-history" class="view-panel" style="display: none;">
       <div id="history-list" class="history-list"></div>
     </div>
 
@@ -276,16 +276,36 @@
   <div class="dialog-overlay" id="start-cook-overlay" onclick="if(event.target===this)closeStartCookDialog()">
     <div class="dialog">
       <div class="dialog-title">Start a cook</div>
-      <div class="dialog-sub">A new session will be logged. Add an optional starting note (rub, wood, weather…).</div>
+      <div class="dialog-sub">Adjust targets for this cook, then tap Start.</div>
       <div class="dialog-row">
         <span class="dialog-label">Cook name</span>
         <input class="dialog-input" id="start-cook-name" placeholder="e.g. Sunday Brisket">
       </div>
       <div class="dialog-row">
+        <span class="dialog-label">Meat target</span>
+        <div class="input-wrap" style="width:100%;">
+          <input type="number" id="start-meat-target" style="width:100%;text-align:left;">
+          <span class="input-unit" id="start-meat-unit">°C</span>
+        </div>
+      </div>
+      <div class="dialog-row">
+        <span class="dialog-label">Grill range</span>
+        <div style="display:flex;gap:8px;width:100%;align-items:center;">
+          <div class="input-wrap" style="flex:1;">
+            <input type="number" id="start-grill-low">
+            <span class="input-unit" id="start-grill-low-unit">°C</span>
+          </div>
+          <span style="color:var(--text-muted);flex-shrink:0;">–</span>
+          <div class="input-wrap" style="flex:1;">
+            <input type="number" id="start-grill-high">
+            <span class="input-unit" id="start-grill-high-unit">°C</span>
+          </div>
+        </div>
+      </div>
+      <div class="dialog-row">
         <span class="dialog-label">Starting note (optional)</span>
         <textarea class="dialog-textarea" id="start-cook-note" placeholder="Apple wood, 2.4kg packer, trimmed fat cap to 6mm…"></textarea>
       </div>
-      <div class="dialog-targets" id="start-targets-summary"></div>
       <div class="dialog-actions">
         <button onclick="closeStartCookDialog()">Cancel</button>
         <button class="primary" onclick="confirmStartCook()">Start</button>
