@@ -28,56 +28,90 @@
   </header>
 
   <main>
-    <div class="probes-grid">
 
-      <!-- Meat probe card -->
-      <div class="card probe-card" id="meat-card">
-        <div class="probe-header">
-          <span class="probe-label">MEAT</span>
-          <span class="status-pill" id="meat-pill"></span>
-        </div>
-        <div class="probe-readout">
-          <span class="probe-temp" id="meat-temp">--</span>
-          <span class="probe-unit" id="meat-unit">°C</span>
-        </div>
-        <div class="progress-row">
-          <div class="progress-track">
-            <div class="progress-fill" id="meat-progress-fill"></div>
+    <!-- Tab bar: Live / History -->
+    <div class="tab-bar">
+      <button class="tab-btn active" id="tab-live" onclick="setView('live')">Live</button>
+      <button class="tab-btn" id="tab-history" onclick="setView('history')">History <span class="tab-count" id="tab-history-count"></span></button>
+    </div>
+
+    <!-- ── LIVE VIEW ──────────────────────────────────────────────── -->
+    <div id="view-live" class="view-panel">
+
+      <!-- Cook bar (Start/Stop, active cook info) -->
+      <div class="cook-bar" id="cook-bar"></div>
+
+      <div class="probes-grid">
+
+        <!-- Meat probe card -->
+        <div class="card probe-card" id="meat-card">
+          <div class="probe-header">
+            <span class="probe-label">MEAT</span>
+            <span class="status-pill" id="meat-pill"></span>
           </div>
-          <span class="progress-pct" id="meat-progress-pct">0%</span>
+          <div class="probe-readout">
+            <span class="probe-temp" id="meat-temp">--</span>
+            <span class="probe-unit" id="meat-unit">°C</span>
+          </div>
+          <div class="progress-row">
+            <div class="progress-track">
+              <div class="progress-fill" id="meat-progress-fill"></div>
+            </div>
+            <span class="progress-pct" id="meat-progress-pct">0%</span>
+          </div>
+          <div class="probe-footer">
+            <span class="probe-meta" id="meat-target-label">Target --</span>
+            <span class="eta-badge" id="eta-badge" data-state="idle">ETA --</span>
+          </div>
         </div>
-        <div class="probe-footer">
-          <span class="probe-meta" id="meat-target-label">Target --</span>
-          <span class="eta-badge" id="eta-badge" data-state="idle">ETA --</span>
+
+        <!-- Grill probe card -->
+        <div class="card probe-card" id="grill-card">
+          <div class="probe-header">
+            <span class="probe-label">GRILL</span>
+            <span class="status-pill" id="grill-badge">READING</span>
+          </div>
+          <div class="probe-readout">
+            <span class="probe-temp" id="grill-temp">--</span>
+            <span class="probe-unit" id="grill-unit">°C</span>
+          </div>
+          <div class="probe-footer" style="margin-top: auto;">
+            <span class="probe-meta" id="grill-range-label">Range --</span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Chart -->
+      <div class="card chart-card">
+        <div class="chart-header">
+          <span class="chart-title">Temperature History</span>
+          <span class="chart-sub">Last 60 min</span>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="chart"></canvas>
         </div>
       </div>
 
-      <!-- Grill probe card -->
-      <div class="card probe-card" id="grill-card">
-        <div class="probe-header">
-          <span class="probe-label">GRILL</span>
-          <span class="status-pill" id="grill-badge">READING</span>
+      <!-- Notes card (only visible during active cook) -->
+      <div class="card notes-card" id="notes-card" style="display:none;">
+        <div class="card-header">
+          <span class="card-header-title">Cook Notes</span>
+          <span class="chart-sub" id="notes-count"></span>
         </div>
-        <div class="probe-readout">
-          <span class="probe-temp" id="grill-temp">--</span>
-          <span class="probe-unit" id="grill-unit">°C</span>
-        </div>
-        <div class="probe-footer" style="margin-top: auto;">
-          <span class="probe-meta" id="grill-range-label">Range --</span>
+        <div id="notes-empty" class="notes-empty">No notes yet. Add one as you go — wood added, lid opened, what you spotted.</div>
+        <div id="notes-list" class="notes-list"></div>
+        <div class="note-composer">
+          <textarea id="note-input" class="note-input" rows="1" placeholder="Add a note…"></textarea>
+          <button class="note-send" onclick="addNote()">Add</button>
         </div>
       </div>
 
     </div>
 
-    <!-- Chart -->
-    <div class="card chart-card">
-      <div class="chart-header">
-        <span class="chart-title">Temperature History</span>
-        <span class="chart-sub">Last 60 min</span>
-      </div>
-      <div class="chart-wrap">
-        <canvas id="chart"></canvas>
-      </div>
+    <!-- ── HISTORY VIEW ────────────────────────────────────────────── -->
+    <div id="view-history" class="view-panel" style="display: none;">
+      <div id="history-list" class="history-list"></div>
     </div>
 
   </main>
@@ -87,129 +121,150 @@
     <button class="settings-btn" onclick="openSettings()">⚙ Settings</button>
   </div>
 
-  <!-- Overlay -->
-  <div id="settings-overlay" class="settings-overlay" onclick="closeSettings()"></div>
+  <!-- Settings overlay (hidden — kept for JS compatibility) -->
+  <div id="settings-overlay" class="settings-overlay" onclick="closeSettings()" style="display:none;"></div>
 
-  <!-- Bottom sheet -->
-  <div id="settings-sheet" class="settings-sheet" aria-hidden="true">
-    <div class="sheet-handle"></div>
-    <div class="sheet-scroll">
+  <!-- Full-page Settings -->
+  <div id="settings-sheet" class="settings-page" aria-hidden="true">
+    <div class="settings-page-header">
+      <span class="settings-page-title">Settings</span>
+      <button class="settings-close" onclick="closeSettings()" aria-label="Close">✕</button>
+    </div>
+    <div class="settings-scroll">
 
-      <!-- Targets -->
-      <h2 class="settings-title">Targets</h2>
-      <div class="settings-rows">
-        <div class="setting-row">
-          <label for="s-meat">Meat target</label>
-          <div class="input-wrap">
-            <input type="number" id="s-meat" value="74">
-            <span class="input-unit" id="s-meat-unit">°C</span>
+      <!-- Targets group -->
+      <div class="settings-group">
+        <div class="settings-group-title">Targets</div>
+        <div class="settings-card">
+          <div class="settings-section-head" style="margin-bottom:10px;">
+            <span class="settings-subtitle">Presets</span>
           </div>
-        </div>
-        <div class="setting-row">
-          <label for="s-grill-low">Grill low</label>
-          <div class="input-wrap">
-            <input type="number" id="s-grill-low" value="160">
-            <span class="input-unit" id="s-grill-low-unit">°C</span>
+          <div class="presets-row" id="preset-chips" style="margin: 0 -16px 14px; padding: 0 16px 4px;"></div>
+          <div class="settings-rows">
+            <div class="setting-row">
+              <label for="s-meat">Meat target</label>
+              <div class="input-wrap">
+                <input type="number" id="s-meat" value="74">
+                <span class="input-unit" id="s-meat-unit">°C</span>
+              </div>
+            </div>
+            <div class="setting-row">
+              <label for="s-grill-low">Grill low</label>
+              <div class="input-wrap">
+                <input type="number" id="s-grill-low" value="160">
+                <span class="input-unit" id="s-grill-low-unit">°C</span>
+              </div>
+            </div>
+            <div class="setting-row">
+              <label for="s-grill-high">Grill high</label>
+              <div class="input-wrap">
+                <input type="number" id="s-grill-high" value="200">
+                <span class="input-unit" id="s-grill-high-unit">°C</span>
+              </div>
+            </div>
           </div>
-        </div>
-        <div class="setting-row">
-          <label for="s-grill-high">Grill high</label>
-          <div class="input-wrap">
-            <input type="number" id="s-grill-high" value="200">
-            <span class="input-unit" id="s-grill-high-unit">°C</span>
-          </div>
+          <button class="btn-update" id="btn-update" onclick="applySettings()" style="margin-top:14px;">Update Targets</button>
         </div>
       </div>
-      <button class="btn-update" id="btn-update" onclick="applySettings()">Update Targets</button>
 
-      <!-- Divider -->
-      <div class="sheet-divider"></div>
+      <!-- Favourites group -->
+      <div class="settings-group">
+        <div class="settings-group-title">Favourites</div>
+        <div class="settings-group-desc">Save a great cook to recreate it instantly. Tap Load to apply, ✕ to remove.</div>
+        <div id="fav-list" class="fav-list"></div>
+      </div>
 
-      <!-- Calibration -->
-      <button class="cal-header" onclick="toggleCal()" aria-expanded="false" id="cal-toggle-btn">
-        <span class="cal-header-title">Probe Calibration</span>
-        <span class="cal-chevron" id="cal-chevron">▾</span>
-      </button>
-      <div class="cal-body" id="cal-body" hidden>
-        <p class="cal-desc">Place each probe in a medium at a known temperature. Record three reference points, then calculate and save the Steinhart-Hart coefficients to the SD card.</p>
+      <!-- Calibration group -->
+      <div class="settings-group">
+        <div class="settings-group-title">Probe Calibration</div>
+        <div class="settings-card">
+          <button class="cal-header" onclick="toggleCal()" aria-expanded="false" id="cal-toggle-btn" style="padding: 0 0 8px;">
+            <span class="cal-header-title">Calibrate probes</span>
+            <span class="cal-chevron" id="cal-chevron">▾</span>
+          </button>
+          <div class="cal-body" id="cal-body" hidden>
+            <p class="cal-desc">Place each probe in a medium at a known temperature. Record three reference points, then calculate and save the Steinhart-Hart coefficients to the SD card.</p>
 
-        <!-- Meat probe calibration -->
-        <div class="cal-probe">
-          <div class="cal-probe-label">MEAT PROBE</div>
-          <div class="cal-points" id="cal-meat-points">
-            <div class="cal-point-row">
-              <span class="cal-pt-num">1</span>
-              <div class="input-wrap cal-temp-wrap">
-                <input type="number" id="cal-meat-t1" value="0">
-                <span class="input-unit">°C</span>
+            <!-- Meat probe calibration -->
+            <div class="cal-probe">
+              <div class="cal-probe-label">MEAT PROBE</div>
+              <div class="cal-points" id="cal-meat-points">
+                <div class="cal-point-row">
+                  <span class="cal-pt-num">1</span>
+                  <div class="input-wrap cal-temp-wrap">
+                    <input type="number" id="cal-meat-t1" value="0">
+                    <span class="input-unit">°C</span>
+                  </div>
+                  <button class="btn-record" onclick="recordPoint('meat',0)" id="cal-meat-btn-0">Record</button>
+                  <span class="cal-resistance" id="cal-meat-r0">--</span>
+                </div>
+                <div class="cal-point-row">
+                  <span class="cal-pt-num">2</span>
+                  <div class="input-wrap cal-temp-wrap">
+                    <input type="number" id="cal-meat-t2" value="25">
+                    <span class="input-unit">°C</span>
+                  </div>
+                  <button class="btn-record" onclick="recordPoint('meat',1)" id="cal-meat-btn-1">Record</button>
+                  <span class="cal-resistance" id="cal-meat-r1">--</span>
+                </div>
+                <div class="cal-point-row">
+                  <span class="cal-pt-num">3</span>
+                  <div class="input-wrap cal-temp-wrap">
+                    <input type="number" id="cal-meat-t3" value="100">
+                    <span class="input-unit">°C</span>
+                  </div>
+                  <button class="btn-record" onclick="recordPoint('meat',2)" id="cal-meat-btn-2">Record</button>
+                  <span class="cal-resistance" id="cal-meat-r2">--</span>
+                </div>
               </div>
-              <button class="btn-record" onclick="recordPoint('meat',0)" id="cal-meat-btn-0">Record</button>
-              <span class="cal-resistance" id="cal-meat-r0">--</span>
-            </div>
-            <div class="cal-point-row">
-              <span class="cal-pt-num">2</span>
-              <div class="input-wrap cal-temp-wrap">
-                <input type="number" id="cal-meat-t2" value="25">
-                <span class="input-unit">°C</span>
+              <button class="btn-calculate" id="cal-meat-calc" onclick="calculateCoeffs('meat')" disabled>Calculate &amp; Save</button>
+              <div class="cal-coeffs hidden" id="cal-meat-result">
+                <span class="cal-coeff-item">A: <span id="cal-meat-A">--</span></span>
+                <span class="cal-coeff-item">B: <span id="cal-meat-B">--</span></span>
+                <span class="cal-coeff-item">C: <span id="cal-meat-C">--</span></span>
               </div>
-              <button class="btn-record" onclick="recordPoint('meat',1)" id="cal-meat-btn-1">Record</button>
-              <span class="cal-resistance" id="cal-meat-r1">--</span>
             </div>
-            <div class="cal-point-row">
-              <span class="cal-pt-num">3</span>
-              <div class="input-wrap cal-temp-wrap">
-                <input type="number" id="cal-meat-t3" value="100">
-                <span class="input-unit">°C</span>
-              </div>
-              <button class="btn-record" onclick="recordPoint('meat',2)" id="cal-meat-btn-2">Record</button>
-              <span class="cal-resistance" id="cal-meat-r2">--</span>
-            </div>
-          </div>
-          <button class="btn-calculate" id="cal-meat-calc" onclick="calculateCoeffs('meat')" disabled>Calculate &amp; Save</button>
-          <div class="cal-coeffs hidden" id="cal-meat-result">
-            <span class="cal-coeff-item">A: <span id="cal-meat-A">--</span></span>
-            <span class="cal-coeff-item">B: <span id="cal-meat-B">--</span></span>
-            <span class="cal-coeff-item">C: <span id="cal-meat-C">--</span></span>
-          </div>
-        </div>
 
-        <!-- Grill probe calibration -->
-        <div class="cal-probe">
-          <div class="cal-probe-label">GRILL PROBE</div>
-          <div class="cal-points" id="cal-grill-points">
-            <div class="cal-point-row">
-              <span class="cal-pt-num">1</span>
-              <div class="input-wrap cal-temp-wrap">
-                <input type="number" id="cal-grill-t1" value="0">
-                <span class="input-unit">°C</span>
+            <!-- Grill probe calibration -->
+            <div class="cal-probe">
+              <div class="cal-probe-label">GRILL PROBE</div>
+              <div class="cal-points" id="cal-grill-points">
+                <div class="cal-point-row">
+                  <span class="cal-pt-num">1</span>
+                  <div class="input-wrap cal-temp-wrap">
+                    <input type="number" id="cal-grill-t1" value="0">
+                    <span class="input-unit">°C</span>
+                  </div>
+                  <button class="btn-record" onclick="recordPoint('grill',0)" id="cal-grill-btn-0">Record</button>
+                  <span class="cal-resistance" id="cal-grill-r0">--</span>
+                </div>
+                <div class="cal-point-row">
+                  <span class="cal-pt-num">2</span>
+                  <div class="input-wrap cal-temp-wrap">
+                    <input type="number" id="cal-grill-t2" value="25">
+                    <span class="input-unit">°C</span>
+                  </div>
+                  <button class="btn-record" onclick="recordPoint('grill',1)" id="cal-grill-btn-1">Record</button>
+                  <span class="cal-resistance" id="cal-grill-r1">--</span>
+                </div>
+                <div class="cal-point-row">
+                  <span class="cal-pt-num">3</span>
+                  <div class="input-wrap cal-temp-wrap">
+                    <input type="number" id="cal-grill-t3" value="100">
+                    <span class="input-unit">°C</span>
+                  </div>
+                  <button class="btn-record" onclick="recordPoint('grill',2)" id="cal-grill-btn-2">Record</button>
+                  <span class="cal-resistance" id="cal-grill-r2">--</span>
+                </div>
               </div>
-              <button class="btn-record" onclick="recordPoint('grill',0)" id="cal-grill-btn-0">Record</button>
-              <span class="cal-resistance" id="cal-grill-r0">--</span>
-            </div>
-            <div class="cal-point-row">
-              <span class="cal-pt-num">2</span>
-              <div class="input-wrap cal-temp-wrap">
-                <input type="number" id="cal-grill-t2" value="25">
-                <span class="input-unit">°C</span>
+              <button class="btn-calculate" id="cal-grill-calc" onclick="calculateCoeffs('grill')" disabled>Calculate &amp; Save</button>
+              <div class="cal-coeffs hidden" id="cal-grill-result">
+                <span class="cal-coeff-item">A: <span id="cal-grill-A">--</span></span>
+                <span class="cal-coeff-item">B: <span id="cal-grill-B">--</span></span>
+                <span class="cal-coeff-item">C: <span id="cal-grill-C">--</span></span>
               </div>
-              <button class="btn-record" onclick="recordPoint('grill',1)" id="cal-grill-btn-1">Record</button>
-              <span class="cal-resistance" id="cal-grill-r1">--</span>
             </div>
-            <div class="cal-point-row">
-              <span class="cal-pt-num">3</span>
-              <div class="input-wrap cal-temp-wrap">
-                <input type="number" id="cal-grill-t3" value="100">
-                <span class="input-unit">°C</span>
-              </div>
-              <button class="btn-record" onclick="recordPoint('grill',2)" id="cal-grill-btn-2">Record</button>
-              <span class="cal-resistance" id="cal-grill-r2">--</span>
-            </div>
-          </div>
-          <button class="btn-calculate" id="cal-grill-calc" onclick="calculateCoeffs('grill')" disabled>Calculate &amp; Save</button>
-          <div class="cal-coeffs hidden" id="cal-grill-result">
-            <span class="cal-coeff-item">A: <span id="cal-grill-A">--</span></span>
-            <span class="cal-coeff-item">B: <span id="cal-grill-B">--</span></span>
-            <span class="cal-coeff-item">C: <span id="cal-grill-C">--</span></span>
+
           </div>
         </div>
       </div>
@@ -217,7 +272,109 @@
     </div>
   </div>
 
+  <!-- ── Start cook dialog ───────────────────────────────────────── -->
+  <div class="dialog-overlay" id="start-cook-overlay" onclick="if(event.target===this)closeStartCookDialog()">
+    <div class="dialog">
+      <div class="dialog-title">Start a cook</div>
+      <div class="dialog-sub">Adjust targets for this cook, then tap Start.</div>
+      <div class="dialog-row">
+        <span class="dialog-label">Cook name</span>
+        <input class="dialog-input" id="start-cook-name" placeholder="e.g. Sunday Brisket">
+      </div>
+      <div class="dialog-row">
+        <span class="dialog-label">Meat target</span>
+        <div class="input-wrap" style="width:100%;">
+          <input type="number" id="start-meat-target" style="width:100%;text-align:left;">
+          <span class="input-unit" id="start-meat-unit">°C</span>
+        </div>
+      </div>
+      <div class="dialog-row">
+        <span class="dialog-label">Grill range</span>
+        <div style="display:flex;gap:8px;width:100%;align-items:center;">
+          <div class="input-wrap" style="flex:1;">
+            <input type="number" id="start-grill-low">
+            <span class="input-unit" id="start-grill-low-unit">°C</span>
+          </div>
+          <span style="color:var(--text-muted);flex-shrink:0;">–</span>
+          <div class="input-wrap" style="flex:1;">
+            <input type="number" id="start-grill-high">
+            <span class="input-unit" id="start-grill-high-unit">°C</span>
+          </div>
+        </div>
+      </div>
+      <div class="dialog-row">
+        <span class="dialog-label">Starting note (optional)</span>
+        <textarea class="dialog-textarea" id="start-cook-note" placeholder="Apple wood, 2.4kg packer, trimmed fat cap to 6mm…"></textarea>
+      </div>
+      <div class="dialog-actions">
+        <button onclick="closeStartCookDialog()">Cancel</button>
+        <button class="primary" onclick="confirmStartCook()">Start</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Stop cook dialog ────────────────────────────────────────── -->
+  <div class="dialog-overlay" id="stop-cook-overlay" onclick="if(event.target===this)closeStopCookDialog()">
+    <div class="dialog">
+      <div class="dialog-title">Stop the cook?</div>
+      <div class="dialog-sub">Saves a summary (duration, peak temps, notes). You can revisit it on the History tab.</div>
+      <div class="dialog-actions">
+        <button onclick="closeStopCookDialog()">Keep cooking</button>
+        <button class="primary" onclick="confirmStopCook(false)">Stop &amp; save</button>
+      </div>
+      <button onclick="confirmStopCook(true)" style="background:none;border:none;color:#ff4d8d;font-weight:700;font-size:12px;padding:4px 0;cursor:pointer;">★ Stop &amp; save as favourite</button>
+    </div>
+  </div>
+
+  <!-- ── History detail ─────────────────────────────────────────── -->
+  <div class="detail-overlay" id="detail-overlay" onclick="closeHistoryDetail()"></div>
+  <div class="detail-modal" id="detail-modal">
+    <div class="detail-header">
+      <button class="detail-back" onclick="closeHistoryDetail()">‹ Back</button>
+      <div class="detail-title" id="detail-title">Cook</div>
+      <button class="detail-fav-btn" id="detail-fav-btn" onclick="toggleDetailFavourite()" aria-label="Favourite">★</button>
+    </div>
+    <div class="detail-scroll">
+      <div class="stats-row" id="detail-stats"></div>
+
+      <div class="card replay-card">
+        <div class="chart-header">
+          <span class="chart-title">Replay</span>
+          <span class="chart-sub">Full cook</span>
+        </div>
+        <div class="replay-wrap">
+          <canvas id="replay-chart"></canvas>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-header-title">Targets used</span>
+          <button class="card-header-action" onclick="loadFromHistory()">Load these →</button>
+        </div>
+        <div class="dialog-targets" id="detail-targets" style="background:transparent;border:none;padding:0;"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-header-title">Notes</span>
+        </div>
+        <div id="detail-notes"></div>
+      </div>
+
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="app.js"></script>
+  <script src="roadmap.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      setTimeout(() => {
+        const el = document.getElementById('tab-history-count');
+        if (el && window.__cookState) el.textContent = window.__cookState.history.length;
+      }, 200);
+    });
+  </script>
 </body>
 </html>

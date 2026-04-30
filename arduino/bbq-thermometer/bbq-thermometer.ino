@@ -8,9 +8,13 @@
 #include <WiFiUdp.h>
 #include <time.h>
 
+#define MAX_PRESETS   16
+#define MAX_FAVS      32
+
 #include "config.h"
 #include "thermistor.h"
 #include "logger.h"
+#include "cook_session.h"
 #include "websocket_handler.h"
 
 // ── Runtime settings — overridable via browser WebSocket ────────────────────
@@ -18,9 +22,16 @@ float meatTarget = DEFAULT_MEAT_TARGET;
 float grillLow   = DEFAULT_GRILL_LOW;
 float grillHigh  = DEFAULT_GRILL_HIGH;
 
+// ── Preset / favourite storage (loaded from SD on boot) ──────────────────────
+Preset    presets[MAX_PRESETS];
+uint8_t   presetCount = 0;
+Favourite favs[MAX_FAVS];
+uint8_t   favCount = 0;
+
 // ── Timing ───────────────────────────────────────────────────────────────────
 unsigned long lastBroadcast = 0;
 unsigned long lastLog       = 0;
+unsigned long lastCookSample = 0;
 
 // ── Core objects ─────────────────────────────────────────────────────────────
 AsyncWebServer server(80);
@@ -89,9 +100,15 @@ void setup() {
     Serial.println("ADS1115 ready (GAIN_ONE)");
   }
 
-  // SD card + load saved calibration
+  // SD card: create folder tree, then load all persisted config
   if (loggerBegin()) {
     loadCalibration();
+    loadSettings(meatTarget, grillLow, grillHigh);
+
+    presetCount = loadPresets(presets, MAX_PRESETS);
+    if (presetCount == 0) seedDefaultPresets(presets, presetCount);
+
+    favCount = loadFavourites(favs, MAX_FAVS);
   }
 
   // WebSocket handler at /ws
@@ -116,7 +133,7 @@ void loop() {
 
   unsigned long now = millis();
 
-  // Read each channel once and reuse for debug, broadcast, and logging
+  // Read each channel once and reuse for broadcast, logging, and cook samples
   float rMeat  = PROBE0_ENABLED ? readResistance(ADS1115_CH_MEAT)  : -1.0f;
   float rGrill = PROBE1_ENABLED ? readResistance(ADS1115_CH_GRILL) : -1.0f;
   float tMeat  = (rMeat  > 500.0f && rMeat  < 2000000.0f) ? resistanceToCelsius(rMeat,  ADS1115_CH_MEAT)  : NAN;
@@ -130,10 +147,15 @@ void loop() {
     wsBroadcast(tMeat, tGrill, getTimestamp());
   }
 
-  // Append CSV row to SD card
+  // Append CSV row to SD card every LOG_INTERVAL_MS
   if (now - lastLog >= LOG_INTERVAL_MS) {
     lastLog = now;
-    logReading(getTodayFilename(getDateStr()),
-               getTimestamp(), tMeat, tGrill);
+    logReading(getTodayFilename(getDateStr()), getTimestamp(), tMeat, tGrill);
+  }
+
+  // Append a cook sample every 30 seconds while a cook is active
+  if (activeCook.active && now - lastCookSample >= 30000UL) {
+    lastCookSample = now;
+    cookAppendReading(tMeat, tGrill);
   }
 }

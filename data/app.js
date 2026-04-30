@@ -380,8 +380,8 @@ function connectWS() {
 
   wsSocket.addEventListener('open', () => {
     setConnectionState(true);
-    // Sync current targets to device on connect
     sendSettings();
+    wsSocket.send(JSON.stringify({ type: 'request_config' }));
   });
 
   wsSocket.addEventListener('message', e => {
@@ -390,8 +390,15 @@ function connectWS() {
 
     if (data.type === 'cal_reading') { handleCalReading(data); return; }
     if (data.type === 'cal_saved')   { handleCalSaved(data);   return; }
+    if (data.type === 'config')      { handleConfig(data);      return; }
+    if (data.type === 'cook_started' || data.type === 'cook_stopped') return;
 
     // Temperature broadcast from firmware
+    if (data.cook_active !== undefined && window.__cookState) {
+      window.__cookState.active = data.cook_active;
+      if (data.cook_name) window.__cookState.name = data.cook_name;
+    }
+
     const meatC  = parseFloat(data.meat.c);
     const grillC = parseFloat(data.grill.c);
     const now    = Date.now();
@@ -421,6 +428,32 @@ function sendSettings() {
     grill_low:   settings.grillLow,
     grill_high:  settings.grillHigh,
   }));
+}
+
+function handleConfig(data) {
+  // Seed settings from device
+  if (data.settings) {
+    settings.meatTarget = data.settings.meat_target;
+    settings.grillLow   = data.settings.grill_low;
+    settings.grillHigh  = data.settings.grill_high;
+    syncSettingsInputs();
+    rebuildChart();
+  }
+  // Seed presets (overrides demo data when connected to a real device)
+  if (data.presets && data.presets.length && window.__presets !== undefined) {
+    window.__presets = data.presets.map(p => ({ name: p.name, c: p.c }));
+    if (typeof renderPresetChips === 'function') renderPresetChips();
+  }
+  // Seed favourites
+  if (data.favourites !== undefined && window.__cookState) {
+    window.__cookState.favourites = data.favourites.map(f => ({
+      id:      f.id,
+      name:    f.name,
+      targets: { meatTarget: f.meat_target, grillLow: f.grill_low, grillHigh: f.grill_high },
+      preset:  f.preset,
+    }));
+    if (typeof renderFavourites === 'function') renderFavourites();
+  }
 }
 
 // ── Main simulation tick ─────────────────────────────────────────────────────

@@ -99,6 +99,14 @@ window.__presets = [
   { name: 'Brisket / pulled pork', c: 95 },
 ];
 
+// ── WS helper — forwards messages to a live device when connected ─────────
+function wsSend(msg) {
+  const connected = typeof isLive === 'function' ? isLive() : wsConnected;
+  if (connected && wsSocket && wsSocket.readyState === WebSocket.OPEN) {
+    wsSocket.send(JSON.stringify(msg));
+  }
+}
+
 // ── App-level state for new features ─────────────────────────────────────
 window.__cookState = {
   active: false,
@@ -128,7 +136,9 @@ function formatDuration(seconds) {
 function formatRelDate(ts) {
   const d = new Date(ts);
   const today = new Date();
-  const diffDays = Math.floor((today - d) / (24 * 3600 * 1000));
+  const midnightToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const midnightD = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const diffDays = Math.round((midnightToday - midnightD) / (24 * 3600 * 1000));
   if (diffDays === 0) return 'Today, ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   if (diffDays === 1) return 'Yesterday';
   if (diffDays < 7)   return d.toLocaleDateString([], { weekday: 'long' });
@@ -147,11 +157,19 @@ function renderPresetChips() {
   const row = document.getElementById('preset-chips');
   if (!row) return;
   row.innerHTML = '';
-  const currentTarget = settings.meatTarget;
+  const inputEl = document.getElementById('s-meat');
+  const inputTarget = inputEl ? (unit === 'F' ? fToC(parseFloat(inputEl.value)) : parseFloat(inputEl.value)) : settings.meatTarget;
+  
   window.__presets.forEach(p => {
     const chip = document.createElement('button');
     chip.className = 'preset-chip';
-    if (Math.abs(p.c - currentTarget) < 0.5) chip.classList.add('active');
+    
+    // Highlight if preset matches exactly, or if temperature matches the input value
+    const isTempMatch = !isNaN(inputTarget) && Math.abs(p.c - inputTarget) < 0.5;
+    if (window.__cookState.preset === p.name || (!window.__cookState.preset && isTempMatch)) {
+      chip.classList.add('active');
+    }
+    
     const tempDisplay = unit === 'F' ? Math.round(cToF(p.c)) : p.c;
     chip.innerHTML = `
       <span>${p.name}</span>
@@ -245,6 +263,14 @@ function confirmStartCook() {
     settings.meatTarget = unit === 'F' ? fToC(rawMeat) : rawMeat;
     settings.grillLow   = unit === 'F' ? fToC(rawLow)  : rawLow;
     settings.grillHigh  = unit === 'F' ? fToC(rawHigh) : rawHigh;
+    
+    if (window.__cookState.preset) {
+      const p = window.__presets.find(x => x.name === window.__cookState.preset);
+      if (!p || Math.abs(p.c - settings.meatTarget) >= 0.5) {
+        window.__cookState.preset = null;
+      }
+    }
+    
     syncSettingsInputs();
   }
 
@@ -262,6 +288,16 @@ function confirmStartCook() {
     { ts: 0, text: `Started cook · target ${fmtWithUnit(settings.meatTarget, 0)} · grill ${fmt(settings.grillLow,0)}–${fmtWithUnit(settings.grillHigh,0)}${s.preset ? ` · ${s.preset}` : ''}`, system: true },
   ];
   if (note) s.notes.push({ ts: 0, text: note });
+
+  wsSend({
+    type:        'cook_start',
+    name:        s.name,
+    preset:      s.preset || '',
+    meat_target: settings.meatTarget,
+    grill_low:   settings.grillLow,
+    grill_high:  settings.grillHigh,
+    ts:          new Date().toISOString().replace(/\.\d{3}Z$/, ''),
+  });
 
   closeStartCookDialog();
   renderCookBar();
@@ -304,14 +340,28 @@ function confirmStopCook(saveAsFavourite) {
   };
   s.history.unshift(session);
 
+  const stopTs = new Date().toISOString().replace(/\.\d{3}Z$/, '');
+
   if (saveAsFavourite) {
+    const favId = 'f-' + Date.now();
     s.favourites.unshift({
-      id: 'f-' + Date.now(),
+      id: favId,
       name: s.name,
       targets: { ...settings },
       preset: s.preset,
     });
+    wsSend({
+      type:        'fav_save',
+      id:          favId,
+      name:        s.name,
+      meat_target: settings.meatTarget,
+      grill_low:   settings.grillLow,
+      grill_high:  settings.grillHigh,
+      preset:      s.preset || '',
+    });
   }
+
+  wsSend({ type: 'cook_stop', ts: stopTs });
 
   // Reset live cook state
   s.active = false;
@@ -377,6 +427,7 @@ function addNote() {
   const ts = Math.floor((Date.now() - s.startedAt) / 1000);
   const lastMeat = meatHistory.length ? meatHistory[meatHistory.length - 1].c : null;
   s.notes.push({ ts, text, temp: lastMeat });
+  wsSend({ type: 'cook_note', text, meat_c: lastMeat ?? 0 });
   input.value = '';
   renderNotesCard();
 }
@@ -416,7 +467,7 @@ function renderFavourites() {
         <div class="fav-targets">${meat}°${unit} meat · ${lo}–${hi}°${unit} grill</div>
       </div>
       <div class="fav-actions">
-        <button class="fav-btn" onclick="loadFavourite('${f.id}')">Load</button>
+        <button class="fav-btn" onclick="loadFavourite('${f.id}', event)">Load</button>
         <button class="fav-btn danger" onclick="deleteFavourite('${f.id}')" aria-label="Delete">✕</button>
       </div>
     `;
@@ -424,7 +475,7 @@ function renderFavourites() {
   });
 }
 
-function loadFavourite(id) {
+function loadFavourite(id, e) {
   const f = window.__cookState.favourites.find(x => x.id === id);
   if (!f) return;
   settings.meatTarget = f.targets.meatTarget;
@@ -437,8 +488,9 @@ function loadFavourite(id) {
   if (meatHistory.length) {
     updateUI(meatHistory[meatHistory.length - 1].c, grillHistory[grillHistory.length - 1].c);
   }
+  if (typeof sendSettings === 'function') sendSettings();
   // Visual confirmation
-  const btn = event && event.target;
+  const btn = e && e.target;
   if (btn) {
     const orig = btn.textContent;
     btn.textContent = 'Loaded';
@@ -449,6 +501,7 @@ window.loadFavourite = loadFavourite;
 
 function deleteFavourite(id) {
   window.__cookState.favourites = window.__cookState.favourites.filter(f => f.id !== id);
+  wsSend({ type: 'fav_delete', id });
   renderFavourites();
 }
 window.deleteFavourite = deleteFavourite;
@@ -597,12 +650,29 @@ function toggleDetailFavourite() {
 
   if (c.favourite) {
     if (!window.__cookState.favourites.find(f => f.name === c.name)) {
+      const favId = 'f-' + Date.now();
       window.__cookState.favourites.unshift({
-        id: 'f-' + Date.now(),
+        id: favId,
         name: c.name,
         targets: { ...c.targets },
         preset: c.preset,
       });
+      wsSend({
+        type:        'fav_save',
+        id:          favId,
+        name:        c.name,
+        meat_target: c.targets.meatTarget,
+        grill_low:   c.targets.grillLow,
+        grill_high:  c.targets.grillHigh,
+        preset:      c.preset || '',
+      });
+      renderFavourites();
+    }
+  } else {
+    const existing = window.__cookState.favourites.find(f => f.name === c.name);
+    if (existing) {
+      window.__cookState.favourites = window.__cookState.favourites.filter(f => f.name !== c.name);
+      wsSend({ type: 'fav_delete', id: existing.id });
       renderFavourites();
     }
   }
@@ -624,6 +694,7 @@ function loadFromHistory() {
   if (meatHistory.length) {
     updateUI(meatHistory[meatHistory.length - 1].c, grillHistory[grillHistory.length - 1].c);
   }
+  if (typeof sendSettings === 'function') sendSettings();
   closeHistoryDetail();
   setView('live');
   // brief flash on cook bar
@@ -723,6 +794,16 @@ function initRoadmap() {
 // Patch the existing applySettings to also re-render preset chips
 const _origApply = window.applySettings;
 window.applySettings = function() {
+  const inputEl = document.getElementById('s-meat');
+  if (inputEl && window.__cookState.preset) {
+    const rawMeat = parseFloat(inputEl.value);
+    const meatC = unit === 'F' ? fToC(rawMeat) : rawMeat;
+    const p = window.__presets.find(x => x.name === window.__cookState.preset);
+    if (!p || Math.abs(p.c - meatC) >= 0.5) {
+      window.__cookState.preset = null;
+    }
+  }
+
   _origApply.apply(this, arguments);
   renderPresetChips();
 };

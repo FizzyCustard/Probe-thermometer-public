@@ -11,6 +11,9 @@ A wireless BBQ thermometer system built on an ESP8266 D1 Mini. Two NTC thermisto
 - We want to make sure we are using coding best practices.
 - We have to make sure we are not going to have any techical debt
 - We should be proud of this code it should be seen as well thought out and put together projject
+
+**the demo site for netlify is in the data folder. use the device/data for the live app's web interface code.**
+
 ---
 
 ## Hardware
