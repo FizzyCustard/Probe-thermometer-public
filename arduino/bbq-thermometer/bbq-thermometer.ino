@@ -45,7 +45,7 @@ NTPClient timeClient(ntpUDP, NTP_SERVER, NTP_UTC_OFFSET_SEC, 60000);
 String getTimestamp() {
   time_t t = timeClient.getEpochTime();
   struct tm* tm = gmtime(&t);
-  char buf[20];
+  char buf[21];
   snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02d",
            tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday,
            tm->tm_hour, tm->tm_min, tm->tm_sec);
@@ -55,7 +55,7 @@ String getTimestamp() {
 String getDateStr() {
   time_t t = timeClient.getEpochTime();
   struct tm* tm = gmtime(&t);
-  char buf[11];
+  char buf[12];
   snprintf(buf, sizeof(buf), "%04d-%02d-%02d",
            tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday);
   return String(buf);

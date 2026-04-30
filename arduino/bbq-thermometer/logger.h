@@ -261,7 +261,7 @@ void loadCalibration() {
   for (uint8_t i = 0; i < 2; i++) {
     char key[8];
     snprintf(key, sizeof(key), "probe%d", i);
-    if (doc.containsKey(key)) {
+    if (doc[key].is<JsonObject>()) {
       probeCoeffs[i].A = doc[key]["A"].as<float>();
       probeCoeffs[i].B = doc[key]["B"].as<float>();
       probeCoeffs[i].C = doc[key]["C"].as<float>();

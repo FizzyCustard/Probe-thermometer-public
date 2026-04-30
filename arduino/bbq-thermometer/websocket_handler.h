@@ -46,8 +46,8 @@ void onWsMessage(AsyncWebSocketClient* client, String msg) {
     float gh  = doc["grill_high"].as<float>();
 
     // Use provided timestamp if supplied, otherwise generate one
-    String ts = doc.containsKey("ts") ? String(doc["ts"].as<const char*>())
-                                      : String("unknown");
+    String ts = doc["ts"].is<const char*>() ? String(doc["ts"].as<const char*>())
+                                             : String("unknown");
 
     bool started = cookStart(name, preset, mt, gl, gh, ts.c_str());
 
@@ -62,8 +62,8 @@ void onWsMessage(AsyncWebSocketClient* client, String msg) {
 
   // ── Cook: stop ────────────────────────────────────────────────────────────
   if (strcmp(type, "cook_stop") == 0) {
-    String ts = doc.containsKey("ts") ? String(doc["ts"].as<const char*>())
-                                      : String("unknown");
+    String ts = doc["ts"].is<const char*>() ? String(doc["ts"].as<const char*>())
+                                             : String("unknown");
     cookStop(ts.c_str());
 
     JsonDocument resp;

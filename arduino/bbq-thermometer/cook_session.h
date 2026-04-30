@@ -73,7 +73,7 @@ void cookAppendReading(float meatC, float grillC) {
   if (isnan(meatC) && isnan(grillC)) return;  // nothing to log
   File f = SD.open(activeCook.filename, FILE_WRITE);
   if (!f) return;
-  f.printf("%lu,%s,%s\n",
+  f.printf("%u,%s,%s\n",
            cookElapsedSeconds(),
            isnan(meatC)  ? "" : String(meatC,  1).c_str(),
            isnan(grillC) ? "" : String(grillC, 1).c_str());
@@ -85,9 +85,9 @@ void cookAppendNote(const char* text, float meatC) {
   if (!activeCook.active) return;
   File f = SD.open(activeCook.filename, FILE_WRITE);
   if (!f) return;
-  f.printf("#note,%lu,%s,%.1f\n", cookElapsedSeconds(), text, meatC);
+  f.printf("#note,%u,%s,%.1f\n", cookElapsedSeconds(), text, meatC);
   f.close();
-  Serial.printf("Note added at %lus: %s\n", cookElapsedSeconds(), text);
+  Serial.printf("Note added at %us: %s\n", cookElapsedSeconds(), text);
 }
 
 // Writes the stopped_at footer row and clears the session.
