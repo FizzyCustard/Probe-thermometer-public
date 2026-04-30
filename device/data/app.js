@@ -426,6 +426,7 @@ function connectWS() {
     setConnState('live');
     sendSettings();
     wsSocket.send(JSON.stringify({ type: 'request_config' }));
+    wsSocket.send(JSON.stringify({ type: 'request_cook_list' }));
   });
 
   wsSocket.addEventListener('message', e => {
@@ -438,6 +439,7 @@ function connectWS() {
     if (data.type === 'cal_reading') { handleCalReading(data); return; }
     if (data.type === 'cal_saved')   { handleCalSaved(data);   return; }
     if (data.type === 'config')      { handleConfig(data);      return; }
+    if (data.type === 'cook_list')   { handleCookList(data);    return; }
     if (data.type === 'cook_started' || data.type === 'cook_stopped') return;
 
     if (!data.meat || !data.grill) return;
@@ -517,6 +519,32 @@ function handleConfig(data) {
     }));
     if (typeof renderFavourites === 'function') renderFavourites();
   }
+}
+
+function handleCookList(data) {
+  if (!window.__cookState || !Array.isArray(data.cooks)) return;
+  window.__cookState.history = data.cooks.map(c => ({
+    id:         c.file,
+    name:       c.name   || c.file,
+    preset:     c.preset || null,
+    startedAt:  c.started_at ? new Date(c.started_at).getTime() : 0,
+    duration:   (c.stopped_at && c.started_at)
+                  ? Math.round((new Date(c.stopped_at) - new Date(c.started_at)) / 1000)
+                  : (c.duration_s || 0),
+    targets: {
+      meatTarget: c.meat_target_c || 74,
+      grillLow:   c.grill_low_c   || 160,
+      grillHigh:  c.grill_high_c  || 200,
+    },
+    peakMeat:     null,
+    peakGrill:    null,
+    targetHitMin: null,
+    notes:        [],
+    favourite:    false,
+  }));
+  if (typeof renderHistoryList === 'function') renderHistoryList();
+  const el = document.getElementById('tab-history-count');
+  if (el) el.textContent = window.__cookState.history.length || '';
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────────

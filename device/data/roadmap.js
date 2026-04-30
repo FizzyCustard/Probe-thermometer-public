@@ -114,7 +114,7 @@ window.__cookState = {
   name: '',
   preset: null,
   notes: [],          // [{ ts (seconds since cook start), text, system?, temp? }]
-  history: window.__demoCookHistory.slice(),
+  history: [],   // populated from SD card via cook_list WS message
   favourites: window.__demoFavourites.slice(),
   selectedHistoryId: null,
   view: 'live',       // 'live' | 'history'
@@ -597,11 +597,11 @@ function openHistoryDetail(id) {
     </div>
     <div class="stat-cell">
       <span class="stat-label">Peak meat</span>
-      <span class="stat-value">${unit === 'F' ? Math.round(cToF(c.peakMeat)) : c.peakMeat.toFixed(1)}<span class="stat-unit">°${unit}</span></span>
+      <span class="stat-value">${c.peakMeat != null ? (unit === 'F' ? Math.round(cToF(c.peakMeat)) : c.peakMeat.toFixed(1)) : '—'}<span class="stat-unit">${c.peakMeat != null ? '°' + unit : ''}</span></span>
     </div>
     <div class="stat-cell">
       <span class="stat-label">Peak grill</span>
-      <span class="stat-value">${unit === 'F' ? Math.round(cToF(c.peakGrill)) : Math.round(c.peakGrill)}<span class="stat-unit">°${unit}</span></span>
+      <span class="stat-value">${c.peakGrill != null ? (unit === 'F' ? Math.round(cToF(c.peakGrill)) : Math.round(c.peakGrill)) : '—'}<span class="stat-unit">${c.peakGrill != null ? '°' + unit : ''}</span></span>
     </div>
   `;
 
@@ -719,16 +719,18 @@ function renderReplayChart(c) {
   const meatData = [];
   const grillData = [];
   const seed = (c.id.charCodeAt(2) || 7) * 13.7;
+  const peakMeat  = c.peakMeat  ?? c.targets.meatTarget;
+  const peakGrill = c.peakGrill ?? ((c.targets.grillLow + c.targets.grillHigh) / 2);
 
   for (let i = 0; i < points; i++) {
     const t = i / (points - 1);
     labels.push(`${Math.round((t * c.duration) / 60)}m`);
     // Meat: sigmoid climb → flatten near target
     const sig = 1 / (1 + Math.exp(-(t - 0.45) * 6));
-    const mC = 18 + (c.peakMeat - 18) * sig + Math.sin(seed + i * 0.4) * 0.6;
+    const mC = 18 + (peakMeat - 18) * sig + Math.sin(seed + i * 0.4) * 0.6;
     // Grill: oscillating around midpoint of range
     const mid = (c.targets.grillLow + c.targets.grillHigh) / 2;
-    const gC = mid + Math.sin(seed * 0.3 + i * 0.18) * (c.peakGrill - mid) * 0.7
+    const gC = mid + Math.sin(seed * 0.3 + i * 0.18) * (peakGrill - mid) * 0.7
                    + Math.cos(seed * 0.7 + i * 0.34) * 6;
     meatData.push(unit === 'F' ? cToF(mC) : mC);
     grillData.push(unit === 'F' ? cToF(gC) : gC);

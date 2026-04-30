@@ -130,6 +130,60 @@ void onWsMessage(AsyncWebSocketClient* client, String msg) {
     return;
   }
 
+  // ── Request cook history list from SD ─────────────────────────────────────
+  if (strcmp(type, "request_cook_list") == 0) {
+    JsonDocument resp;
+    resp["type"] = "cook_list";
+    JsonArray arr = resp["cooks"].to<JsonArray>();
+
+    File dir = SD.open(BBQ_COOKS);
+    if (dir) {
+      while (true) {
+        File entry = dir.openNextFile();
+        if (!entry) break;
+        if (entry.isDirectory()) { entry.close(); continue; }
+
+        String fname = String(entry.name());
+        entry.close();
+        if (!fname.startsWith("cook_") || !fname.endsWith(".csv")) continue;
+
+        String fullPath = String(BBQ_COOKS) + "/" + fname;
+        File f = SD.open(fullPath.c_str(), FILE_READ);
+        if (!f) continue;
+
+        JsonObject cook = arr.add<JsonObject>();
+        cook["file"] = fname;
+        uint32_t lastElapsed = 0;
+
+        while (f.available()) {
+          String line = f.readStringUntil('\n');
+          line.trim();
+          if      (line.startsWith("#name,"))          cook["name"]          = line.substring(6);
+          else if (line.startsWith("#preset,"))        cook["preset"]        = line.substring(8);
+          else if (line.startsWith("#meat_target_c,")) cook["meat_target_c"] = line.substring(15).toFloat();
+          else if (line.startsWith("#grill_low_c,"))   cook["grill_low_c"]   = line.substring(13).toFloat();
+          else if (line.startsWith("#grill_high_c,"))  cook["grill_high_c"]  = line.substring(14).toFloat();
+          else if (line.startsWith("#started_at,"))    cook["started_at"]    = line.substring(12);
+          else if (line.startsWith("#stopped_at,"))    cook["stopped_at"]    = line.substring(12);
+          else if (line.length() > 0 && !line.startsWith("#") && !line.startsWith("elapsed")) {
+            int comma = line.indexOf(',');
+            if (comma > 0) lastElapsed = line.substring(0, comma).toInt();
+          }
+        }
+        f.close();
+
+        if (!cook["stopped_at"].is<const char*>())
+          cook["duration_s"] = lastElapsed;
+      }
+      dir.close();
+    }
+
+    String out;
+    serializeJson(resp, out);
+    client->text(out);
+    return;
+  }
+
   // ── Calibration: read live resistance on a probe channel ─────────────────
   if (strcmp(type, "cal_read") == 0) {
     uint8_t probe = doc["probe"].as<uint8_t>();
