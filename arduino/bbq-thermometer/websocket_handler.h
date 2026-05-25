@@ -269,6 +269,19 @@ static void sendConfig(AsyncWebSocketClient* client) {
     f["preset"]      = favs[i].preset;
   }
 
+  if (activeCook.active) {
+    doc["cook_active"]      = true;
+    doc["cook_name"]        = activeCook.name;
+    doc["cook_preset"]      = activeCook.preset;
+    doc["cook_elapsed_s"]   = cookElapsedSeconds();
+    doc["cook_started_at"]  = activeCook.startedAt;
+    doc["cook_meat_target"] = activeCook.meatTargetC;
+    doc["cook_grill_low"]   = activeCook.grillLowC;
+    doc["cook_grill_high"]  = activeCook.grillHighC;
+  } else {
+    doc["cook_active"] = false;
+  }
+
   String out;
   serializeJson(doc, out);
   client->text(out);
