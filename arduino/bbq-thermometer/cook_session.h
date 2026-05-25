@@ -7,14 +7,15 @@
 // ── Cook session state ────────────────────────────────────────────────────────
 
 struct CookSession {
-  bool    active;
-  char    name[64];
-  char    preset[48];
-  char    filename[56];   // e.g. /BBQ/cooks/cook_2025-07-14T08-14-00.csv
+  bool     active;
+  char     name[64];
+  char     preset[48];
+  char     filename[56];   // e.g. /BBQ/cooks/cook_2025-07-14T08-14-00.csv
+  char     startedAt[24];  // ISO timestamp, e.g. "2025-07-14T08:14:00"
   uint32_t startMillis;
-  float   meatTargetC;
-  float   grillLowC;
-  float   grillHighC;
+  float    meatTargetC;
+  float    grillLowC;
+  float    grillHighC;
 };
 
 CookSession activeCook = {};
@@ -41,8 +42,9 @@ bool cookStart(const char* name, const char* preset,
   snprintf(activeCook.filename, sizeof(activeCook.filename),
            "%s/cook_%s.csv", BBQ_COOKS, safets);
 
-  strlcpy(activeCook.name,   name,   sizeof(activeCook.name));
-  strlcpy(activeCook.preset, preset, sizeof(activeCook.preset));
+  strlcpy(activeCook.name,      name,         sizeof(activeCook.name));
+  strlcpy(activeCook.preset,    preset,       sizeof(activeCook.preset));
+  strlcpy(activeCook.startedAt, isoTimestamp, sizeof(activeCook.startedAt));
   activeCook.meatTargetC = meatTarget;
   activeCook.grillLowC   = grillLow;
   activeCook.grillHighC  = grillHigh;

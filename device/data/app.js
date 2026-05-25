@@ -519,6 +519,29 @@ function handleConfig(data) {
     }));
     if (typeof renderFavourites === 'function') renderFavourites();
   }
+
+  if (data.cook_active && window.__cookState) {
+    const s = window.__cookState;
+    s.active    = true;
+    s.name      = data.cook_name || '';
+    s.preset    = data.cook_preset || null;
+    s.startedAt = Date.now() - (data.cook_elapsed_s || 0) * 1000;
+    if (!s.notes.length) {
+      s.notes = [{
+        ts: 0,
+        text: `Cook already in progress · joined at ${formatDuration(data.cook_elapsed_s || 0)} elapsed`,
+        system: true,
+      }];
+    }
+    if (data.cook_meat_target) settings.meatTarget = data.cook_meat_target;
+    if (data.cook_grill_low)   settings.grillLow   = data.cook_grill_low;
+    if (data.cook_grill_high)  settings.grillHigh  = data.cook_grill_high;
+    if (typeof renderCookBar         === 'function') renderCookBar();
+    if (typeof renderNotesCard       === 'function') renderNotesCard();
+    if (typeof toggleNotesVisibility === 'function') toggleNotesVisibility();
+  } else if (data.cook_active === false && window.__cookState) {
+    window.__cookState.active = false;
+  }
 }
 
 function handleCookList(data) {
