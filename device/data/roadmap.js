@@ -7,63 +7,7 @@
 //    • Preset Temperatures (chip selector)
 // ═══════════════════════════════════════════════════════════════════════════
 
-// ── Demo data: pre-populated history + favourites (so the prototype feels alive)
-// stored in window so the Tweaks panel can reset / mutate them
-
-window.__demoCookHistory = [
-  {
-    id: 'c-1',
-    name: 'Sunday Brisket',
-    preset: 'Brisket / pulled pork',
-    startedAt: new Date('2026-04-26T08:14:00').getTime(),
-    duration: 9 * 3600 + 42 * 60,
-    targets: { meatTarget: 95, grillLow: 105, grillHigh: 130 },
-    peakMeat: 96.4,
-    peakGrill: 138.2,
-    targetHitMin: 9 * 60 + 18,
-    notes: [
-      { ts: 0,        text: 'Started cook with apple wood, 2.4kg packer brisket. Trimmed fat cap to ~6mm.' },
-      { ts: 76 * 60,  text: 'Stall hit at 68°C. Spritzing with apple juice every 20 min.' },
-      { ts: 192 * 60, text: 'Wrapped in butcher paper at 75°C. Smelling incredible.' },
-      { ts: 9 * 60 * 60 + 18 * 60, text: 'Probe slides like butter at 95°C. Resting in cooler for 2hrs.' },
-    ],
-    favourite: true,
-  },
-  {
-    id: 'c-2',
-    name: 'Tuesday Wings',
-    preset: 'Chicken — safe minimum',
-    startedAt: new Date('2026-04-23T18:22:00').getTime(),
-    duration: 1 * 3600 + 8 * 60,
-    targets: { meatTarget: 74, grillLow: 175, grillHigh: 200 },
-    peakMeat: 78.1,
-    peakGrill: 211.3,
-    targetHitMin: 56,
-    notes: [
-      { ts: 0,        text: 'Buffalo wings, salt brined for 2hrs. Hot-and-fast.' },
-      { ts: 24 * 60,  text: 'Grill spiked above 200 for a few mins — opened the lid to coast it down.' },
-      { ts: 56 * 60,  text: 'Hit target. Tossed in sauce, back on for 5 min to crisp.' },
-    ],
-    favourite: false,
-  },
-  {
-    id: 'c-3',
-    name: 'Reverse Sear Ribeye',
-    preset: 'Beef — medium rare',
-    startedAt: new Date('2026-04-20T19:10:00').getTime(),
-    duration: 52 * 60,
-    targets: { meatTarget: 54, grillLow: 110, grillHigh: 130 },
-    peakMeat: 57.8,
-    peakGrill: 132.5,
-    targetHitMin: 38,
-    notes: [
-      { ts: 0,       text: '2-inch ribeye, dry brined overnight.' },
-      { ts: 38 * 60, text: 'Hit 54°C. Pulled, ripped grill to 280°C for the sear.' },
-      { ts: 48 * 60, text: 'Seared 90s a side. Rested 8 min. Perfect.' },
-    ],
-    favourite: true,
-  },
-];
+// ── Demo data: favourites only. Cook history comes from SD via WS.
 
 window.__demoFavourites = [
   {
@@ -580,16 +524,7 @@ function renderHistoryList() {
 
 let detailReplayChart = null;
 
-function openHistoryDetail(id) {
-  const c = window.__cookState.history.find(x => x.id === id);
-  if (!c) return;
-  window.__cookState.selectedHistoryId = id;
-  document.getElementById('detail-overlay').classList.add('open');
-  document.getElementById('detail-modal').classList.add('open');
-  document.getElementById('detail-title').textContent = c.name;
-  document.getElementById('detail-fav-btn').classList.toggle('active', c.favourite);
-
-  // Stats
+function renderHistoryDetailStats(c) {
   document.getElementById('detail-stats').innerHTML = `
     <div class="stat-cell">
       <span class="stat-label">Duration</span>
@@ -604,33 +539,59 @@ function openHistoryDetail(id) {
       <span class="stat-value">${c.peakGrill != null ? (unit === 'F' ? Math.round(cToF(c.peakGrill)) : Math.round(c.peakGrill)) : '—'}<span class="stat-unit">${c.peakGrill != null ? '°' + unit : ''}</span></span>
     </div>
   `;
+}
+window.renderHistoryDetailStats = renderHistoryDetailStats;
 
-  // Notes
+function renderHistoryDetailNotes(c) {
   const notesEl = document.getElementById('detail-notes');
   if (!c.notes.length) {
     notesEl.innerHTML = '<div class="notes-empty">No notes were taken during this cook.</div>';
-  } else {
-    notesEl.innerHTML = '<div class="notes-list">' + c.notes.slice().reverse().map(n => {
-      const tStr = n.ts === 0 ? 'Start' : `+${formatDuration(n.ts)}`;
-      return `<div class="note-row${n.system ? ' system' : ''}">
-        <div class="note-dot"></div>
-        <div class="note-body">
-          <div class="note-meta"><span>${tStr}</span></div>
-          <div class="note-text">${escapeHtml(n.text)}</div>
-        </div>
-      </div>`;
-    }).join('') + '</div>';
+    return;
   }
+  notesEl.innerHTML = '<div class="notes-list">' + c.notes.slice().reverse().map(n => {
+    const tStr = n.ts === 0 ? 'Start' : `+${formatDuration(n.ts)}`;
+    return `<div class="note-row${n.system ? ' system' : ''}">
+      <div class="note-dot"></div>
+      <div class="note-body">
+        <div class="note-meta"><span>${tStr}</span></div>
+        <div class="note-text">${escapeHtml(n.text)}</div>
+      </div>
+    </div>`;
+  }).join('') + '</div>';
+}
+window.renderHistoryDetailNotes = renderHistoryDetailNotes;
 
-  // Load From / Targets summary
+function openHistoryDetail(id) {
+  const c = window.__cookState.history.find(x => x.id === id);
+  if (!c) return;
+  window.__cookState.selectedHistoryId = id;
+  document.getElementById('detail-overlay').classList.add('open');
+  document.getElementById('detail-modal').classList.add('open');
+  document.getElementById('detail-title').textContent = c.name;
+  document.getElementById('detail-fav-btn').classList.toggle('active', c.favourite);
+
+  renderHistoryDetailStats(c);
+  renderHistoryDetailNotes(c);
+
+  // Targets summary
   document.getElementById('detail-targets').innerHTML = `
     <div class="dialog-target-row"><span>Meat target</span><span>${unit === 'F' ? Math.round(cToF(c.targets.meatTarget)) : c.targets.meatTarget}°${unit}</span></div>
     <div class="dialog-target-row"><span>Grill range</span><span>${unit === 'F' ? Math.round(cToF(c.targets.grillLow)) : c.targets.grillLow}–${unit === 'F' ? Math.round(cToF(c.targets.grillHigh)) : c.targets.grillHigh}°${unit}</span></div>
     ${c.preset ? `<div class="dialog-target-row"><span>Preset</span><span>${c.preset}</span></div>` : ''}
   `;
 
-  // Replay chart — synthesize a reasonable curve from the metadata
-  setTimeout(() => renderReplayChart(c), 50);
+  // Show a placeholder while waiting for cook_data from the device.
+  // If the cook already has cached points (e.g. re-opened), render them now.
+  setTimeout(() => {
+    if (Array.isArray(c.points) && c.points.length) {
+      renderReplayChart(c, c.points);
+    } else {
+      renderReplayEmpty('Loading…');
+    }
+  }, 50);
+
+  // Request the full time-series from the device
+  wsSend({ type: 'request_cook_data', file: id });
 }
 window.openHistoryDetail = openHistoryDetail;
 
@@ -708,33 +669,42 @@ window.loadFromHistory = loadFromHistory;
 
 // ── Replay chart ─────────────────────────────────────────────────────────
 
-function renderReplayChart(c) {
+function formatElapsedLabel(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return h > 0 ? `${h}h${m ? ' ' + m + 'm' : ''}` : `${m}m`;
+}
+
+function renderReplayEmpty(message) {
   const canvas = document.getElementById('replay-chart');
   if (!canvas) return;
+  if (detailReplayChart) { detailReplayChart.destroy(); detailReplayChart = null; }
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width  = canvas.clientWidth;
+  const h = canvas.height = canvas.clientHeight;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = '#555';
+  ctx.font = '12px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(message, w / 2, h / 2);
+}
+
+function renderReplayChart(c, points) {
+  const canvas = document.getElementById('replay-chart');
+  if (!canvas) return;
+  if (!Array.isArray(points) || points.length === 0) {
+    renderReplayEmpty('No data recorded for this cook');
+    return;
+  }
   const ctx = canvas.getContext('2d');
   if (detailReplayChart) detailReplayChart.destroy();
 
-  const points = 60;
-  const labels = [];
-  const meatData = [];
-  const grillData = [];
-  const seed = (c.id.charCodeAt(2) || 7) * 13.7;
-  const peakMeat  = c.peakMeat  ?? c.targets.meatTarget;
-  const peakGrill = c.peakGrill ?? ((c.targets.grillLow + c.targets.grillHigh) / 2);
+  const labels    = points.map(p => formatElapsedLabel(p.t));
+  const meatData  = points.map(p => p.m == null ? null : (unit === 'F' ? cToF(p.m) : p.m));
+  const grillData = points.map(p => p.g == null ? null : (unit === 'F' ? cToF(p.g) : p.g));
+  const N         = points.length;
 
-  for (let i = 0; i < points; i++) {
-    const t = i / (points - 1);
-    labels.push(`${Math.round((t * c.duration) / 60)}m`);
-    // Meat: sigmoid climb → flatten near target
-    const sig = 1 / (1 + Math.exp(-(t - 0.45) * 6));
-    const mC = 18 + (peakMeat - 18) * sig + Math.sin(seed + i * 0.4) * 0.6;
-    // Grill: oscillating around midpoint of range
-    const mid = (c.targets.grillLow + c.targets.grillHigh) / 2;
-    const gC = mid + Math.sin(seed * 0.3 + i * 0.18) * (peakGrill - mid) * 0.7
-                   + Math.cos(seed * 0.7 + i * 0.34) * 6;
-    meatData.push(unit === 'F' ? cToF(mC) : mC);
-    grillData.push(unit === 'F' ? cToF(gC) : gC);
-  }
   const target = unit === 'F' ? cToF(c.targets.meatTarget) : c.targets.meatTarget;
   const lo     = unit === 'F' ? cToF(c.targets.grillLow)   : c.targets.grillLow;
   const hi     = unit === 'F' ? cToF(c.targets.grillHigh)  : c.targets.grillHigh;
@@ -744,11 +714,11 @@ function renderReplayChart(c) {
     data: {
       labels,
       datasets: [
-        { label: 'Meat',  data: meatData,  borderColor: '#ff4d8d', backgroundColor: 'rgba(255,77,141,0.1)', borderWidth: 2, fill: true,  tension: 0.4, pointRadius: 0 },
-        { label: 'Grill', data: grillData, borderColor: 'rgba(255,255,255,0.7)', borderWidth: 2, fill: false, tension: 0.4, pointRadius: 0 },
-        { label: 'Target', data: Array(points).fill(target), borderColor: 'rgba(255,77,141,0.4)', borderWidth: 1.5, borderDash: [6,4], pointRadius: 0, fill: false },
-        { label: 'Grill low',  data: Array(points).fill(lo), borderColor: 'rgba(255,200,74,0.3)', borderWidth: 1, borderDash: [4,4], pointRadius: 0, fill: false },
-        { label: 'Grill high', data: Array(points).fill(hi), borderColor: 'rgba(255,200,74,0.3)', borderWidth: 1, borderDash: [4,4], pointRadius: 0, fill: false },
+        { label: 'Meat',  data: meatData,  borderColor: '#ff4d8d', backgroundColor: 'rgba(255,77,141,0.1)', borderWidth: 2, fill: true,  tension: 0.3, pointRadius: 0, spanGaps: true },
+        { label: 'Grill', data: grillData, borderColor: 'rgba(255,255,255,0.7)', borderWidth: 2, fill: false, tension: 0.3, pointRadius: 0, spanGaps: true },
+        { label: 'Target', data: Array(N).fill(target), borderColor: 'rgba(255,77,141,0.4)', borderWidth: 1.5, borderDash: [6,4], pointRadius: 0, fill: false },
+        { label: 'Grill low',  data: Array(N).fill(lo), borderColor: 'rgba(255,200,74,0.3)', borderWidth: 1, borderDash: [4,4], pointRadius: 0, fill: false },
+        { label: 'Grill high', data: Array(N).fill(hi), borderColor: 'rgba(255,200,74,0.3)', borderWidth: 1, borderDash: [4,4], pointRadius: 0, fill: false },
       ],
     },
     options: {
@@ -762,11 +732,19 @@ function renderReplayChart(c) {
       },
       plugins: {
         legend: { display: true, position: 'top', align: 'end', labels: { color: '#555', font: { size: 10 }, boxWidth: 16, boxHeight: 2, padding: 12, filter: i => ['Meat','Grill'].includes(i.text) } },
-        tooltip: { enabled: false },
+        tooltip: {
+          enabled: true,
+          filter: i => ['Meat', 'Grill'].includes(i.dataset.label),
+          callbacks: {
+            label: ctx => `${ctx.dataset.label}: ${Math.round(ctx.parsed.y)}°${unit}`,
+          },
+        },
       },
     },
   });
 }
+window.renderReplayChart = renderReplayChart;
+window.renderReplayEmpty = renderReplayEmpty;
 
 // ─────────────────────────────────────────────────────────────────────────
 //  INIT — wire up the new bits after DOM is ready

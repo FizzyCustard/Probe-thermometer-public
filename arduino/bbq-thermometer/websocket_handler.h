@@ -184,6 +184,115 @@ void onWsMessage(AsyncWebSocketClient* client, String msg) {
     return;
   }
 
+  // ── Request full time-series for a single cook ───────────────────────────
+  if (strcmp(type, "request_cook_data") == 0) {
+    const char* fileReq = doc["file"] | "";
+    size_t flen = strlen(fileReq);
+
+    // Whitelist filename: cook_<safe-chars>.csv, no path separators or ".."
+    if (flen < 10 || flen > 60) return;
+    if (strncmp(fileReq, "cook_", 5) != 0) return;
+    if (strcmp(fileReq + flen - 4, ".csv") != 0) return;
+    if (strstr(fileReq, "..") != nullptr) return;
+    for (size_t i = 0; i < flen; i++) {
+      char ch = fileReq[i];
+      bool ok = (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+                (ch >= '0' && ch <= '9') || ch == '_' || ch == '-' || ch == '.';
+      if (!ok) return;
+    }
+
+    String fullPath = String(BBQ_COOKS) + "/" + fileReq;
+    File f = SD.open(fullPath.c_str(), FILE_READ);
+    if (!f) return;
+
+    // Pass 1: count data rows, read meat target (needed for target-hit calc)
+    uint32_t dataRows   = 0;
+    float    meatTargetC = 0;
+    while (f.available()) {
+      String line = f.readStringUntil('\n');
+      line.trim();
+      if (line.length() == 0) continue;
+      if (line.startsWith("#meat_target_c,")) meatTargetC = line.substring(15).toFloat();
+      if (line.startsWith("#") || line.startsWith("elapsed")) continue;
+      dataRows++;
+    }
+
+    const uint32_t MAX_POINTS = 240;
+    uint32_t stride = (dataRows + MAX_POINTS - 1) / MAX_POINTS;
+    if (stride < 1) stride = 1;
+
+    // Pass 2: parse rows, downsample, compute peaks + target-hit, capture notes
+    f.seek(0);
+    JsonDocument resp;
+    resp["type"] = "cook_data";
+    resp["file"] = fileReq;
+    JsonArray points = resp["points"].to<JsonArray>();
+    JsonArray notes  = resp["notes"].to<JsonArray>();
+
+    float    peakMeat   = -1000;
+    float    peakGrill  = -1000;
+    int32_t  targetHitS = -1;
+    uint32_t rowIdx     = 0;
+
+    while (f.available()) {
+      String line = f.readStringUntil('\n');
+      line.trim();
+      if (line.length() == 0) continue;
+
+      if (line.startsWith("#note,")) {
+        // #note,<elapsed_s>,<text>,<meat_c>  — text may contain commas
+        int c1   = line.indexOf(',', 6);
+        int last = line.lastIndexOf(',');
+        if (c1 > 6 && last > c1) {
+          JsonObject n = notes.add<JsonObject>();
+          n["ts"]   = (uint32_t)line.substring(6, c1).toInt();
+          n["text"] = line.substring(c1 + 1, last);
+        }
+        continue;
+      }
+      if (line.startsWith("#") || line.startsWith("elapsed")) continue;
+
+      int c1 = line.indexOf(',');
+      int c2 = line.indexOf(',', c1 + 1);
+      if (c1 < 0 || c2 < 0) continue;
+
+      uint32_t t = (uint32_t)line.substring(0, c1).toInt();
+      String mStr = line.substring(c1 + 1, c2);
+      String gStr = line.substring(c2 + 1);
+      bool hasM = mStr.length() > 0;
+      bool hasG = gStr.length() > 0;
+      float m = hasM ? mStr.toFloat() : 0;
+      float g = hasG ? gStr.toFloat() : 0;
+
+      // Track peaks + first target-hit on every row (not just downsampled)
+      if (hasM && m > peakMeat)  peakMeat  = m;
+      if (hasG && g > peakGrill) peakGrill = g;
+      if (hasM && targetHitS < 0 && meatTargetC > 0 && m >= meatTargetC) {
+        targetHitS = (int32_t)t;
+      }
+
+      if (rowIdx % stride == 0) {
+        JsonObject p = points.add<JsonObject>();
+        p["t"] = t;
+        if (hasM) p["m"] = roundf(m * 10) / 10.0f;
+        if (hasG) p["g"] = roundf(g * 10) / 10.0f;
+      }
+      rowIdx++;
+    }
+    f.close();
+
+    if (peakMeat  > -999) resp["peak_meat_c"]  = roundf(peakMeat  * 10) / 10.0f;
+    if (peakGrill > -999) resp["peak_grill_c"] = roundf(peakGrill * 10) / 10.0f;
+    if (targetHitS >= 0)  resp["target_hit_s"] = targetHitS;
+
+    String out;
+    serializeJson(resp, out);
+    client->text(out);
+    Serial.printf("Cook data sent: %s (%u rows → %u points)\n",
+                  fileReq, dataRows, (unsigned)points.size());
+    return;
+  }
+
   // ── Calibration: read live resistance on a probe channel ─────────────────
   if (strcmp(type, "cal_read") == 0) {
     uint8_t probe = doc["probe"].as<uint8_t>();

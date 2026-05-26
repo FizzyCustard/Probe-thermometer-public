@@ -440,6 +440,7 @@ function connectWS() {
     if (data.type === 'cal_saved')   { handleCalSaved(data);   return; }
     if (data.type === 'config')      { handleConfig(data);      return; }
     if (data.type === 'cook_list')   { handleCookList(data);    return; }
+    if (data.type === 'cook_data')   { handleCookData(data);    return; }
     if (data.type === 'cook_started' || data.type === 'cook_stopped') return;
 
     if (!data.meat || !data.grill) return;
@@ -541,6 +542,24 @@ function handleConfig(data) {
     if (typeof toggleNotesVisibility === 'function') toggleNotesVisibility();
   } else if (data.cook_active === false && window.__cookState) {
     window.__cookState.active = false;
+  }
+}
+
+function handleCookData(data) {
+  if (!window.__cookState || !data.file) return;
+  const cook = window.__cookState.history.find(c => c.id === data.file);
+  if (!cook) return;
+
+  cook.points    = Array.isArray(data.points) ? data.points : [];
+  cook.peakMeat  = data.peak_meat_c  != null ? data.peak_meat_c  : cook.peakMeat;
+  cook.peakGrill = data.peak_grill_c != null ? data.peak_grill_c : cook.peakGrill;
+  cook.targetHitMin = data.target_hit_s != null ? Math.round(data.target_hit_s / 60) : cook.targetHitMin;
+  cook.notes     = Array.isArray(data.notes) ? data.notes : [];
+
+  if (window.__cookState.selectedHistoryId === data.file) {
+    if (typeof renderReplayChart      === 'function') renderReplayChart(cook, cook.points);
+    if (typeof renderHistoryDetailStats === 'function') renderHistoryDetailStats(cook);
+    if (typeof renderHistoryDetailNotes === 'function') renderHistoryDetailNotes(cook);
   }
 }
 
