@@ -244,6 +244,7 @@ function confirmStartCook() {
   });
 
   closeStartCookDialog();
+  requestNotificationPermission();   // async, fire-and-forget — must not block cook-start rendering
   renderCookBar();
   renderNotesCard();
   toggleNotesVisibility();

@@ -221,6 +221,7 @@ function updateUI(meatC, grillC) {
       document.getElementById('meat-pill').textContent = 'TARGET REACHED';
       document.getElementById('meat-pill').className = 'status-pill reached';
       showBanner('Target temperature reached — time to check the meat!');
+      showMeatTargetNotification(settings.meatTarget, unit);
     }
   } else {
     document.getElementById('meat-temp').textContent = '--';
@@ -275,6 +276,38 @@ function showBanner(msg) {
 
 function closeBanner() {
   document.getElementById('banner').classList.add('hidden');
+}
+
+// ── Notifications ────────────────────────────────────────────────────────────
+
+async function requestNotificationPermission() {
+  if (!('Notification' in window)) return;            // API not supported
+  if (Notification.permission === 'granted') return;  // already granted
+  if (Notification.permission === 'denied') return;   // user blocked — respect it
+  try {
+    await Notification.requestPermission();
+  } catch (e) {
+    // Absorbs legacy callback-based browsers (Safari < 15) or any throw
+  }
+}
+
+function showMeatTargetNotification(meatTargetC, currentUnit) {
+  if (!('Notification' in window)) return;
+  if (Notification.permission !== 'granted') return;
+
+  const displayTemp = currentUnit === 'F'
+    ? Math.round(cToF(meatTargetC))
+    : meatTargetC;
+  const unitStr = currentUnit === 'F' ? '°F' : '°C';
+
+  const n = new Notification('BBQ Monitor — Target Reached!', {
+    body: `Meat hit ${displayTemp}${unitStr} — time to check!`,
+    icon: '/favicon.ico',        // silently ignored if absent on the device
+    tag:  'bbq-meat-target',     // collapses any duplicate notifications
+    requireInteraction: false,   // auto-dismiss; user doesn't need to clear it
+  });
+
+  n.onclick = () => { window.focus(); n.close(); };
 }
 
 // ── Unit toggle ─────────────────────────────────────────────────────────────
