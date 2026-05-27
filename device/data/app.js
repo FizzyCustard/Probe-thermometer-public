@@ -53,23 +53,23 @@ function chartDatasets() {
   const { meatTarget, grillLow, grillHigh } = settings;
   const len = meatHistory.length;
   return [
-    makeLine('Meat',  meatHistory.map(d => toDisplay(d.c)),  '#ff4d8d', 'rgba(255,77,141,0.08)'),
-    makeLine('Grill', grillHistory.map(d => toDisplay(d.c)), 'rgba(255,255,255,0.7)', null),
-    makeDash('Meat target', Array(len).fill(toDisplay(meatTarget)), 'rgba(255,77,141,0.4)'),
-    makeDash('Grill low',   Array(len).fill(toDisplay(grillLow)),   'rgba(255,200,74,0.35)'),
-    makeDash('Grill high',  Array(len).fill(toDisplay(grillHigh)),  'rgba(255,200,74,0.35)'),
+    { ...makeLine('Meat',  meatHistory.map(d => toDisplay(d.c)),  '#ff4d8d', 'rgba(255,77,141,0.08)'), yAxisID: 'y'  },
+    { ...makeLine('Grill', grillHistory.map(d => toDisplay(d.c)), 'rgba(255,255,255,0.7)', null),       yAxisID: 'y2' },
+    { ...makeDash('Meat target', Array(len).fill(toDisplay(meatTarget)), 'rgba(255,77,141,0.4)'),        yAxisID: 'y'  },
+    { ...makeDash('Grill low',   Array(len).fill(toDisplay(grillLow)),   'rgba(255,200,74,0.35)'),       yAxisID: 'y2' },
+    { ...makeDash('Grill high',  Array(len).fill(toDisplay(grillHigh)),  'rgba(255,200,74,0.35)'),       yAxisID: 'y2' },
   ];
 }
 
-function chartYBounds() {
-  return unit === 'F'
-    ? { min: 60,  max: 430 }
-    : { min: 0,   max: 220 };
+function chartYBoundsMeat() {
+  return unit === 'F' ? { min: 32, max: 320 } : { min: 0, max: 160 };
+}
+function chartYBoundsGrill() {
+  return unit === 'F' ? { min: 32, max: 610 } : { min: 0, max: 320 };
 }
 
 function initChart() {
   const ctx = document.getElementById('chart').getContext('2d');
-  const bounds = chartYBounds();
   chart = new Chart(ctx, {
     type: 'line',
     data: {
@@ -88,12 +88,25 @@ function initChart() {
           ticks:  { color: '#444', maxTicksLimit: 7, font: { size: 11 } },
         },
         y: {
+          position: 'left',
           border: { display: false },
           grid:   { color: 'rgba(255,255,255,0.04)' },
-          min: bounds.min,
-          max: bounds.max,
+          min: chartYBoundsMeat().min,
+          max: chartYBoundsMeat().max,
           ticks: {
-            color: '#444',
+            color: 'rgba(255,77,141,0.6)',
+            font: { size: 11 },
+            callback: v => v + unitLabel(),
+          },
+        },
+        y2: {
+          position: 'right',
+          border: { display: false },
+          grid:   { drawOnChartArea: false },
+          min: chartYBoundsGrill().min,
+          max: chartYBoundsGrill().max,
+          ticks: {
+            color: 'rgba(255,255,255,0.35)',
             font: { size: 11 },
             callback: v => v + unitLabel(),
           },
@@ -132,7 +145,6 @@ function initChart() {
 
 function rebuildChart() {
   const { meatTarget, grillLow, grillHigh } = settings;
-  const bounds = chartYBounds();
   const len = meatHistory.length;
 
   // Update in-place so Chart.js doesn't tear down and recreate dataset
@@ -144,9 +156,12 @@ function rebuildChart() {
   chart.data.datasets[3].data = Array(len).fill(toDisplay(grillLow));
   chart.data.datasets[4].data = Array(len).fill(toDisplay(grillHigh));
 
-  chart.options.scales.y.min = bounds.min;
-  chart.options.scales.y.max = bounds.max;
-  chart.options.scales.y.ticks.callback = v => v + unitLabel();
+  chart.options.scales.y.min  = chartYBoundsMeat().min;
+  chart.options.scales.y.max  = chartYBoundsMeat().max;
+  chart.options.scales.y.ticks.callback  = v => v + unitLabel();
+  chart.options.scales.y2.min = chartYBoundsGrill().min;
+  chart.options.scales.y2.max = chartYBoundsGrill().max;
+  chart.options.scales.y2.ticks.callback = v => v + unitLabel();
   chart.options.plugins.tooltip.callbacks.label =
     ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}${unitLabel()}`;
 
