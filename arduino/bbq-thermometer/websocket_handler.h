@@ -451,6 +451,8 @@ void wsBroadcast(float meatC, float grillC, String timestamp) {
     doc["cook_active"] = false;
   }
 
+  doc["rssi"] = WiFi.RSSI();
+
   String out;
   serializeJson(doc, out);
   ws.textAll(out);

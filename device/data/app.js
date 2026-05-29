@@ -419,12 +419,31 @@ function setConnState(state) {
     offlineSince = 0;
     if (bannerShown) { closeBanner(); bannerShown = false; }
   }
+
+  if (state !== 'live') updateSignalStrength(null);
 }
 
 function setPillReconnecting() {
   const pill = document.getElementById('connection-pill');
   if (!pill) return;
   pill.textContent = 'RECONNECTING…';
+}
+
+function updateSignalStrength(rssi) {
+  const el = document.getElementById('signal-icon');
+  if (!el) return;
+  if (rssi == null) {
+    el.classList.remove('visible', 's1', 's2', 's3', 's4');
+    el.title = '';
+    return;
+  }
+  const tier = rssi >= -55 ? 's4'
+             : rssi >= -65 ? 's3'
+             : rssi >= -75 ? 's2'
+             :               's1';
+  el.classList.remove('s1', 's2', 's3', 's4');
+  el.classList.add('visible', tier);
+  el.title = `WiFi: ${rssi} dBm`;
 }
 
 function scheduleReconnect() {
@@ -500,6 +519,7 @@ function connectWS() {
       appendChartPoint(meatC, grillC);
     }
 
+    if (data.rssi != null) updateSignalStrength(data.rssi);
     updateUI(meatC, grillC);
   });
 
