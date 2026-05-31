@@ -5,6 +5,7 @@
 #include "config.h"
 
 extern Adafruit_ADS1115 ads;
+extern bool adsReady;   // false when the ADS1115 failed to initialise
 
 // ── Steinhart-Hart coefficients ───────────────────────────────────────────────
 
@@ -29,6 +30,7 @@ SHCoeffs probeCoeffs[2] = {
 // We scale by the actual 3.3V supply.
 
 float readResistance(uint8_t channel) {
+  if (!adsReady) return -1.0f;                        // ADC unavailable
   int16_t raw = ads.readADC_SingleEnded(channel);
   if (raw <= 0) return -1.0f;                         // open circuit / no probe
   float voltage = (raw / 32767.0f) * 4.096f;

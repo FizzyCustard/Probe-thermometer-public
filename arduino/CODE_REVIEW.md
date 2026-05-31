@@ -37,6 +37,11 @@ No code was changed — this is a review only.
 
 ## High severity
 
+> **All four high-severity items below were fixed** (boot timeout + offline
+> continue, background reconnect with NTP re-sync, ADS1115 ready-flag gate, and
+> deferral of the heavy cook-history reads from the async callback to `loop()`).
+> The original descriptions are retained for context.
+
 ### 1. WiFi connect blocks forever at boot
 
 `bbq-thermometer.ino:82-85`

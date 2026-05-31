@@ -11,6 +11,11 @@
 #define MAX_PRESETS   16
 #define MAX_FAVS      32
 
+// WiFi connection behaviour: bound the boot-time wait, then continue offline and
+// keep retrying in the background so the device still reads probes without WiFi.
+#define WIFI_CONNECT_TIMEOUT_MS  20000UL
+#define WIFI_RETRY_INTERVAL_MS   10000UL
+
 #include "config.h"
 #include "thermistor.h"
 #include "logger.h"
@@ -37,6 +42,7 @@ unsigned long lastCookSample = 0;
 AsyncWebServer server(80);
 AsyncWebSocket  ws("/ws");
 Adafruit_ADS1115 ads;
+bool      adsReady = false;   // true once ads.begin() succeeds; gates all reads
 WiFiUDP   ntpUDP;
 NTPClient timeClient(ntpUDP, NTP_SERVER, NTP_UTC_OFFSET_SEC, 60000);
 
@@ -75,25 +81,35 @@ void setup() {
     Serial.println("LittleFS mounted OK");
   }
 
-  // WiFi — blocks until connected
+  // WiFi — wait up to WIFI_CONNECT_TIMEOUT_MS, then continue regardless so the
+  // device still reads probes and logs to SD when WiFi is unavailable.
   WiFi.mode(WIFI_STA);
+  WiFi.persistent(false);
+  WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.printf("Connecting to WiFi (%s)", WIFI_SSID);
-  while (WiFi.status() != WL_CONNECTED) {
+  unsigned long wifiStart = millis();
+  while (WiFi.status() != WL_CONNECTED &&
+         millis() - wifiStart < WIFI_CONNECT_TIMEOUT_MS) {
     delay(500);
     Serial.print(".");
   }
-  Serial.printf("\nConnected — IP: %s\n", WiFi.localIP().toString().c_str());
 
-  // NTP time sync
+  // NTP time sync (only meaningful once WiFi is up; maintainWiFi() re-syncs later)
   timeClient.begin();
-  timeClient.forceUpdate();
-  Serial.printf("NTP synced: %s\n", getTimestamp().c_str());
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.printf("\nConnected — IP: %s\n", WiFi.localIP().toString().c_str());
+    timeClient.forceUpdate();
+    Serial.printf("NTP synced: %s\n", getTimestamp().c_str());
+  } else {
+    Serial.println("\nWiFi connect timed out — continuing offline, will keep retrying");
+  }
 
   // ADS1115 over I2C
   Wire.begin();
-  if (!ads.begin(ADS1115_I2C_ADDRESS)) {
-    Serial.println("ERROR: ADS1115 not found");
+  adsReady = ads.begin(ADS1115_I2C_ADDRESS);
+  if (!adsReady) {
+    Serial.println("ERROR: ADS1115 not found — probe readings disabled");
     Serial.println("  Check: SDA→D2, SCL→D1, VDD→3.3V, ADDR→GND");
   } else {
     ads.setGain(GAIN_ONE);  // ±4.096 V full scale
@@ -125,10 +141,35 @@ void setup() {
                 WiFi.localIP().toString().c_str());
 }
 
+// ── WiFi maintenance ────────────────────────────────────────────────────────
+//
+// Called every loop; acts at most once per WIFI_RETRY_INTERVAL_MS. Reconnects
+// when the link is down and re-syncs NTP on the transition back to connected.
+
+void maintainWiFi() {
+  static unsigned long lastCheck = 0;
+  static bool wasConnected = false;
+  unsigned long now = millis();
+  if (now - lastCheck < WIFI_RETRY_INTERVAL_MS) return;
+  lastCheck = now;
+
+  bool connected = (WiFi.status() == WL_CONNECTED);
+  if (!connected) {
+    Serial.println("WiFi down — reconnecting...");
+    WiFi.reconnect();
+  } else if (!wasConnected) {
+    Serial.printf("WiFi reconnected — IP: %s\n", WiFi.localIP().toString().c_str());
+    timeClient.forceUpdate();  // re-sync NTP after the outage
+  }
+  wasConnected = connected;
+}
+
 // ── Loop ──────────────────────────────────────────────────────────────────────
 
 void loop() {
   ws.cleanupClients();
+  wsProcessPending();   // run deferred (heavy) cook-history reads off the async path
+  maintainWiFi();
   timeClient.update();
 
   unsigned long now = millis();
