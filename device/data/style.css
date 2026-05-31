@@ -126,6 +126,33 @@ header {
   color: var(--success);
 }
 
+/* ── Signal strength icon ───────────────────────────────────────────────── */
+
+.signal-icon {
+  display: none;
+  align-items: flex-end;
+  gap: 2px;
+  height: 12px;
+  margin-left: 2px;
+}
+.signal-icon.visible { display: inline-flex; }
+
+.signal-icon b {
+  display: block;
+  width: 3px;
+  border-radius: 1px 1px 0 0;
+  background: rgba(255, 255, 255, 0.2);
+}
+.signal-icon b:nth-child(1) { height: 3px;  }
+.signal-icon b:nth-child(2) { height: 6px;  }
+.signal-icon b:nth-child(3) { height: 9px;  }
+.signal-icon b:nth-child(4) { height: 12px; }
+
+.signal-icon.s1 b:nth-child(1)    { background: var(--primary); }
+.signal-icon.s2 b:nth-child(-n+2) { background: var(--warning); }
+.signal-icon.s3 b:nth-child(-n+3) { background: var(--success); }
+.signal-icon.s4 b                 { background: var(--success); }
+
 /* Unit switch */
 .unit-switch {
   display: flex;
