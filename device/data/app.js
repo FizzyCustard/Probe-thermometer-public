@@ -348,6 +348,7 @@ function openSettings() {
   document.getElementById('settings-sheet').classList.add('open');
   document.getElementById('settings-sheet').setAttribute('aria-hidden', 'false');
   document.getElementById('settings-overlay').classList.add('open');
+  if (_apMode) wifiScan();
 }
 
 function closeSettings() {
@@ -355,7 +356,9 @@ function closeSettings() {
   document.getElementById('settings-sheet').setAttribute('aria-hidden', 'true');
   document.getElementById('settings-overlay').classList.remove('open');
   const passField = document.getElementById('wifi-pass');
-  if (passField) passField.value = '';
+  if (passField) { passField.value = ''; passField.type = 'password'; }
+  const passToggle = document.getElementById('wifi-pass-toggle');
+  if (passToggle) passToggle.style.opacity = '';
   const scanResults = document.getElementById('wifi-scan-results');
   if (scanResults) scanResults.classList.add('hidden');
 }
@@ -880,15 +883,22 @@ function setAPModeBanner(on) {
   if (on) {
     msg.textContent = 'Device is in setup mode — open Settings to connect to WiFi.';
     banner.classList.remove('hidden');
+    const sheet = document.getElementById('settings-sheet');
+    if (sheet && sheet.classList.contains('open')) wifiScan();
   }
 }
 
 function updateWifiStatusLine() {
-  const el = document.getElementById('wifi-status-line');
-  if (!el) return;
-  el.textContent = _apMode
-    ? 'Not connected to WiFi. Enter your network details below.'
-    : 'Connected. Enter new details to switch networks.';
+  const textEl = document.getElementById('wifi-status-text');
+  const dot    = document.getElementById('wifi-status-dot');
+  if (!textEl) return;
+  if (_apMode) {
+    textEl.textContent = 'Not connected to WiFi. Enter your network details below.';
+    if (dot) dot.dataset.state = 'ap';
+  } else {
+    textEl.textContent = 'Connected. Enter new details to switch networks.';
+    if (dot) dot.dataset.state = 'connected';
+  }
 }
 
 function wifiScan() {
@@ -927,18 +937,43 @@ function handleWifiNetworks(data) {
   } else {
     const sorted = [...data.networks].sort((a, b) => b.rssi - a.rssi);
     sorted.forEach(n => {
-      const chip = document.createElement('button');
-      chip.className = 'wifi-network-chip';
-      chip.textContent = n.ssid;
-      const rssiSpan = document.createElement('span');
-      rssiSpan.className = 'wifi-rssi';
-      rssiSpan.textContent = ` ${n.rssi} dBm`;
-      chip.appendChild(rssiSpan);
-      chip.addEventListener('click', () => wifiSelectNetwork(n.ssid));
-      container.appendChild(chip);
+      const row = document.createElement('button');
+      row.className = 'wifi-network-row';
+      row.addEventListener('click', () => wifiSelectNetwork(n.ssid));
+
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'wifi-network-name';
+      nameSpan.textContent = n.ssid;
+
+      const bars = document.createElement('span');
+      bars.className = 'wifi-signal-bars';
+      bars.setAttribute('aria-label', n.rssi + ' dBm');
+      const level = n.rssi >= -60 ? 4 : n.rssi >= -70 ? 3 : n.rssi >= -80 ? 2 : 1;
+      ['▂', '▄', '▆', '█'].forEach((ch, i) => {
+        const b = document.createElement('span');
+        b.textContent = ch;
+        b.className = i < level ? 'bar-filled' : 'bar-empty';
+        bars.appendChild(b);
+      });
+
+      row.appendChild(nameSpan);
+      row.appendChild(bars);
+      container.appendChild(row);
     });
   }
   container.classList.remove('hidden');
+}
+
+function toggleWifiPass() {
+  const input  = document.getElementById('wifi-pass');
+  const toggle = document.getElementById('wifi-pass-toggle');
+  if (!input) return;
+  const showing = input.type === 'text';
+  input.type = showing ? 'password' : 'text';
+  if (toggle) {
+    toggle.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+    toggle.style.opacity = showing ? '' : '1';
+  }
 }
 
 function wifiSelectNetwork(ssid) {

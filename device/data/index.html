@@ -182,26 +182,27 @@
       <div class="settings-group" id="wifi-group">
         <div class="settings-group-title">WiFi</div>
         <div class="settings-card">
-          <p class="settings-group-desc" id="wifi-status-line">Checking…</p>
+          <p class="settings-group-desc" id="wifi-status-line">
+            <span class="wifi-status-dot" id="wifi-status-dot"></span><span id="wifi-status-text">Checking…</span>
+          </p>
           <div class="settings-rows">
-            <div class="setting-row">
+            <div class="setting-row wifi-ssid-row">
               <label for="wifi-ssid">Network name</label>
-              <div class="input-wrap">
+              <div class="input-wrap wifi-ssid-wrap">
                 <input type="text" id="wifi-ssid" autocomplete="off" spellcheck="false" placeholder="e.g. MyHomeWiFi">
               </div>
+              <button class="btn-secondary btn-scan-inline" id="wifi-scan-btn" onclick="wifiScan()">Scan</button>
             </div>
             <div class="setting-row">
               <label for="wifi-pass">Password</label>
-              <div class="input-wrap">
+              <div class="input-wrap wifi-pass-wrap">
                 <input type="password" id="wifi-pass" autocomplete="off" placeholder="Leave blank if open">
+                <button type="button" class="wifi-pass-toggle" id="wifi-pass-toggle" onclick="toggleWifiPass()" aria-label="Show password" tabindex="-1">&#128065;</button>
               </div>
             </div>
           </div>
           <div id="wifi-scan-results" class="wifi-scan-results hidden"></div>
-          <div class="wifi-actions">
-            <button class="btn-secondary" id="wifi-scan-btn" onclick="wifiScan()">Scan</button>
-            <button class="btn-update" id="wifi-save-btn" onclick="wifiSave()">Save &amp; Connect</button>
-          </div>
+          <button class="btn-update" id="wifi-save-btn" onclick="wifiSave()" style="margin-top:14px;">Save &amp; Connect</button>
           <p class="wifi-note" id="wifi-save-status"></p>
         </div>
       </div>
