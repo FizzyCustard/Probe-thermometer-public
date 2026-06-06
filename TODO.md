@@ -7,8 +7,25 @@ priority than the CRITICAL/HIGH items already fixed. Pick them up in a future se
 
 ## MEDIUM
 
+### Notes not appearing in cook history
+**File:** `arduino/bbq-thermometer/cook_session.h` + `device/data/roadmap.js`  
+Notes added during a cook are not showing up when the cook history detail is opened.
+May not be saving correctly to the CSV.  
+**Fix:** Verify `cookAppendNote` writes `#note,<elapsed>,<text>,<meat_c>` and that
+`openHistoryDetail` reads/displays the notes array from the `cook_data` response.
+
+---
+
+### History detail card not scrollable
+**File:** `device/data/style.css` + `device/data/roadmap.js`  
+When a cook has a long timeline or many notes, the history detail card does not allow
+scrolling — content is clipped.  
+**Fix:** Ensure the history detail container has `overflow-y: auto` and a bounded `max-height`.
+
+---
+
 ### Trailing `\r` in cook CSV timestamp fields
-**File:** `arduino/bbq-thermometer/websocket_handler.h` lines 176–177  
+**File:** `arduino/bbq-thermometer/websocket_handler.h`  
 On Windows-line-ended files, `f.readStringUntil('\n')` leaves `\r` on the extracted substring.
 `started_at` / `stopped_at` arrive at the browser as e.g. `"2025-07-14T08:14:00\r"`, causing
 `new Date(…)` to return `Invalid Date` and breaking duration display.  
@@ -17,7 +34,7 @@ On Windows-line-ended files, `f.readStringUntil('\n')` leaves `\r` on the extrac
 ---
 
 ### Magic offset substrings in cook metadata parser
-**File:** `arduino/bbq-thermometer/websocket_handler.h` lines 173–175  
+**File:** `arduino/bbq-thermometer/websocket_handler.h`  
 `line.substring(15)` for `#meat_target_c,` etc. are hardcoded magic numbers. A one-character
 change to the CSV prefix silently parses the wrong value.  
 **Fix:** Replace with `line.substring(line.indexOf(',') + 1).toFloat()` for each numeric field.
