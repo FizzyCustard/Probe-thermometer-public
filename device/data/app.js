@@ -491,6 +491,14 @@ function connectWS() {
 
   wsSocket.addEventListener('close', () => {
     setConnState('offline');
+    // If wifi save was in-flight when the connection dropped, unblock the button
+    const wifiBtn = document.getElementById('wifi-save-btn');
+    if (wifiBtn && wifiBtn.disabled && wifiBtn.textContent === 'Saving…') {
+      wifiBtn.textContent = 'Save & Connect';
+      wifiBtn.disabled = false;
+      const wifiStatus = document.getElementById('wifi-save-status');
+      if (wifiStatus) wifiStatus.textContent = 'Connection lost — please try again.';
+    }
     scheduleReconnect();
   });
   wsSocket.addEventListener('error', () => { /* close fires next */ });
@@ -574,13 +582,16 @@ function handleCookList(data) {
     name:       c.name   || c.file,
     preset:     c.preset || null,
     startedAt:  c.started_at ? new Date(c.started_at).getTime() : 0,
-    duration:   (c.stopped_at && c.started_at)
-                  ? Math.round((new Date(c.stopped_at) - new Date(c.started_at)) / 1000)
-                  : (c.duration_s || 0),
+    duration: (() => {
+      const d = (c.stopped_at && c.started_at)
+        ? Math.round((new Date(c.stopped_at) - new Date(c.started_at)) / 1000)
+        : NaN;
+      return isFinite(d) && d > 0 ? d : (c.duration_s || 0);
+    })(),
     targets: {
-      meatTarget: c.meat_target_c || 74,
-      grillLow:   c.grill_low_c   || 160,
-      grillHigh:  c.grill_high_c  || 200,
+      meatTarget: c.meat_target_c != null ? c.meat_target_c : 74,
+      grillLow:   c.grill_low_c   != null ? c.grill_low_c   : 160,
+      grillHigh:  c.grill_high_c  != null ? c.grill_high_c  : 200,
     },
     peakMeat:     null,
     peakGrill:    null,
@@ -755,13 +766,25 @@ function handleWifiNetworks(data) {
   const container = document.getElementById('wifi-scan-results');
   if (!container || !Array.isArray(data.networks)) return;
 
+  container.innerHTML = '';
   if (data.networks.length === 0) {
-    container.innerHTML = '<p class="wifi-scan-empty">No networks found</p>';
+    const p = document.createElement('p');
+    p.className = 'wifi-scan-empty';
+    p.textContent = 'No networks found';
+    container.appendChild(p);
   } else {
     const sorted = [...data.networks].sort((a, b) => b.rssi - a.rssi);
-    container.innerHTML = sorted.map(n =>
-      `<button class="wifi-network-chip" onclick="wifiSelectNetwork(${JSON.stringify(n.ssid)})">${n.ssid} <span class="wifi-rssi">${n.rssi} dBm</span></button>`
-    ).join('');
+    sorted.forEach(n => {
+      const chip = document.createElement('button');
+      chip.className = 'wifi-network-chip';
+      chip.textContent = n.ssid;
+      const rssiSpan = document.createElement('span');
+      rssiSpan.className = 'wifi-rssi';
+      rssiSpan.textContent = ` ${n.rssi} dBm`;
+      chip.appendChild(rssiSpan);
+      chip.addEventListener('click', () => wifiSelectNetwork(n.ssid));
+      container.appendChild(chip);
+    });
   }
   container.classList.remove('hidden');
 }

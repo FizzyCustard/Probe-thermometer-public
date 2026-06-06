@@ -43,6 +43,10 @@ NTPClient timeClient(ntpUDP, NTP_SERVER, NTP_UTC_OFFSET_SEC, 60000);
 
 // ── Timestamp helpers ─────────────────────────────────────────────────────────
 
+bool ntpReady() {
+  return timeClient.getEpochTime() > 1000000000UL;
+}
+
 String getTimestamp() {
   time_t t = timeClient.getEpochTime();
   struct tm* tm = gmtime(&t);
@@ -164,8 +168,8 @@ void loop() {
     wsBroadcast(tMeat, tGrill, getTimestamp());
   }
 
-  // Append CSV row to SD card every LOG_INTERVAL_MS (skipped in AP mode — no valid timestamp)
-  if (!isAPMode() && now - lastLog >= LOG_INTERVAL_MS) {
+  // Append CSV row to SD card every LOG_INTERVAL_MS (requires valid NTP timestamp)
+  if (!isAPMode() && ntpReady() && now - lastLog >= LOG_INTERVAL_MS) {
     lastLog = now;
     logReading(getTodayFilename(getDateStr()), getTimestamp(), tMeat, tGrill);
   }

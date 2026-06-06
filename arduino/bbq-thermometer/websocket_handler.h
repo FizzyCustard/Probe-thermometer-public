@@ -78,7 +78,8 @@ void onWsMessage(AsyncWebSocketClient* client, String msg) {
   // ── Cook: add note ────────────────────────────────────────────────────────
   if (strcmp(type, "cook_note") == 0) {
     const char* text = doc["text"] | "";
-    float meatC = doc["meat_c"] | NAN;
+    // Use NAN sentinel only if field is actually present; cookAppendNote guards it
+    float meatC = doc["meat_c"].is<float>() ? doc["meat_c"].as<float>() : NAN;
     cookAppendNote(text, meatC);
     return;
   }
@@ -137,9 +138,16 @@ void onWsMessage(AsyncWebSocketClient* client, String msg) {
     resp["type"] = "cook_list";
     JsonArray arr = resp["cooks"].to<JsonArray>();
 
+    const uint8_t MAX_COOK_LIST = 30;
+    uint8_t cookCount = 0;
+
     File dir = SD.open(BBQ_COOKS);
     if (dir) {
       while (true) {
+        if (cookCount >= MAX_COOK_LIST) {
+          resp["truncated"] = true;
+          break;
+        }
         File entry = dir.openNextFile();
         if (!entry) break;
         if (entry.isDirectory()) { entry.close(); continue; }
@@ -155,6 +163,7 @@ void onWsMessage(AsyncWebSocketClient* client, String msg) {
         JsonObject cook = arr.add<JsonObject>();
         cook["file"] = fname;
         uint32_t lastElapsed = 0;
+        cookCount++;
 
         while (f.available()) {
           String line = f.readStringUntil('\n');

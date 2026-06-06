@@ -21,6 +21,11 @@
 #define DEFAULT_GRILL_LOW    160.0f
 #define DEFAULT_GRILL_HIGH   200.0f
 
+// ── Probe enable flags ────────────────────────────────────────────────────────
+
+#define PROBE0_ENABLED  1   // 1 = meat probe active, 0 = disabled
+#define PROBE1_ENABLED  1   // 1 = grill probe active, 0 = disabled
+
 // ── Hardware pins ─────────────────────────────────────────────────────────────
 
 #define SD_CS_PIN             D8
