@@ -115,10 +115,13 @@ function renderPresetChips() {
     }
     
     const tempDisplay = unit === 'F' ? Math.round(cToF(p.c)) : p.c;
-    chip.innerHTML = `
-      <span>${p.name}</span>
-      <span class="preset-temp">${tempDisplay}°${unit}</span>
-    `;
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = p.name;
+    const tempSpan = document.createElement('span');
+    tempSpan.className = 'preset-temp';
+    tempSpan.textContent = `${tempDisplay}°${unit}`;
+    chip.appendChild(nameSpan);
+    chip.appendChild(tempSpan);
     chip.onclick = () => {
       // Fill the meat target input only — the user still presses Update
       document.getElementById('s-meat').value = tempDisplay;
@@ -155,7 +158,7 @@ function renderCookBar() {
     bar.innerHTML = `
       <div class="cook-bar-info">
         <span class="cook-bar-label">● Live cook</span>
-        <span class="cook-bar-name">${s.name || 'Untitled cook'}</span>
+        <span class="cook-bar-name">${escapeHtml(s.name || 'Untitled cook')}</span>
         <span class="cook-bar-time" id="cook-elapsed">${formatDuration(elapsed)} elapsed</span>
       </div>
       <div class="cook-bar-actions">
@@ -267,8 +270,8 @@ function confirmStopCook(saveAsFavourite) {
   const duration = Math.floor((Date.now() - s.startedAt) / 1000);
   const lastMeat  = meatHistory.length  ? meatHistory[meatHistory.length - 1].c  : null;
   const lastGrill = grillHistory.length ? grillHistory[grillHistory.length - 1].c : null;
-  const peakMeat  = meatHistory.length  ? Math.max(...meatHistory.map(d => d.c))  : lastMeat;
-  const peakGrill = grillHistory.length ? Math.max(...grillHistory.map(d => d.c)) : lastGrill;
+  const peakMeat  = meatHistory.length  ? Math.max(...meatHistory.map(d => d.c))  : null;
+  const peakGrill = grillHistory.length ? Math.max(...grillHistory.map(d => d.c)) : null;
 
   const session = {
     id: 'c-' + Date.now(),
@@ -277,8 +280,8 @@ function confirmStopCook(saveAsFavourite) {
     startedAt: s.startedAt,
     duration,
     targets: { ...settings },
-    peakMeat: Math.round(peakMeat * 10) / 10,
-    peakGrill: Math.round(peakGrill * 10) / 10,
+    peakMeat:  peakMeat  != null ? Math.round(peakMeat  * 10) / 10 : null,
+    peakGrill: peakGrill != null ? Math.round(peakGrill * 10) / 10 : null,
     targetHitMin: lastMeat >= settings.meatTarget ? Math.floor(duration / 60) : null,
     notes: s.notes.slice(),
     favourite: !!saveAsFavourite,
@@ -578,7 +581,7 @@ function openHistoryDetail(id) {
   document.getElementById('detail-targets').innerHTML = `
     <div class="dialog-target-row"><span>Meat target</span><span>${unit === 'F' ? Math.round(cToF(c.targets.meatTarget)) : c.targets.meatTarget}°${unit}</span></div>
     <div class="dialog-target-row"><span>Grill range</span><span>${unit === 'F' ? Math.round(cToF(c.targets.grillLow)) : c.targets.grillLow}–${unit === 'F' ? Math.round(cToF(c.targets.grillHigh)) : c.targets.grillHigh}°${unit}</span></div>
-    ${c.preset ? `<div class="dialog-target-row"><span>Preset</span><span>${c.preset}</span></div>` : ''}
+    ${c.preset ? `<div class="dialog-target-row"><span>Preset</span><span>${escapeHtml(c.preset)}</span></div>` : ''}
   `;
 
   // Show a placeholder while waiting for cook_data from the device.

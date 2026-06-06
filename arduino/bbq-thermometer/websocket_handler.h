@@ -5,6 +5,7 @@
 #include "thermistor.h"
 #include "logger.h"
 #include "cook_session.h"
+#include "wifi_manager.h"
 
 extern AsyncWebSocket ws;
 extern float meatTarget;
@@ -86,7 +87,8 @@ void onWsMessage(AsyncWebSocketClient* client, String msg) {
   // ── Cook: add note ────────────────────────────────────────────────────────
   if (strcmp(type, "cook_note") == 0) {
     const char* text = doc["text"] | "";
-    float meatC = doc["meat_c"] | NAN;
+    // Use NAN sentinel only if field is actually present; cookAppendNote guards it
+    float meatC = doc["meat_c"].is<float>() ? doc["meat_c"].as<float>() : NAN;
     cookAppendNote(text, meatC);
     return;
   }
@@ -186,6 +188,43 @@ void onWsMessage(AsyncWebSocketClient* client, String msg) {
     serializeJson(resp, out);
     client->text(out);
     Serial.printf("Cal read probe %d point %d: %.0f Ω\n", probe, point, r);
+    return;
+  }
+
+  // ── WiFi: scan for nearby networks ───────────────────────────────────────
+  if (strcmp(type, "wifi_scan") == 0) {
+    int n = WiFi.scanNetworks();
+    JsonDocument resp;
+    resp["type"] = "wifi_networks";
+    JsonArray nets = resp["networks"].to<JsonArray>();
+    for (int i = 0; i < n; i++) {
+      JsonObject net = nets.add<JsonObject>();
+      net["ssid"] = WiFi.SSID(i);
+      net["rssi"] = WiFi.RSSI(i);
+    }
+    WiFi.scanDelete();
+    String out;
+    serializeJson(resp, out);
+    client->text(out);
+    return;
+  }
+
+  // ── WiFi: save credentials and restart ───────────────────────────────────
+  if (strcmp(type, "wifi_config") == 0) {
+    const char* ssid = doc["ssid"]     | "";
+    const char* pass = doc["password"] | "";
+    bool saved = saveWifiCreds(ssid, pass);
+    JsonDocument resp;
+    resp["type"]       = "wifi_saved";
+    resp["saved"]      = saved;
+    resp["restarting"] = saved;
+    String out;
+    serializeJson(resp, out);
+    client->text(out);
+    if (saved) {
+      delay(1000);
+      ESP.restart();
+    }
     return;
   }
 
@@ -434,6 +473,8 @@ static void sendConfig(AsyncWebSocketClient* client) {
     doc["cook_active"] = false;
   }
 
+  if (isAPMode()) doc["ap_mode"] = true;
+
   String out;
   serializeJson(doc, out);
   client->text(out);
@@ -494,7 +535,8 @@ void wsBroadcast(float meatC, float grillC, String timestamp) {
     doc["cook_active"] = false;
   }
 
-  doc["rssi"] = WiFi.RSSI();
+  if (isAPMode()) doc["ap_mode"] = true;
+  else doc["rssi"] = WiFi.RSSI();
 
   String out;
   serializeJson(doc, out);

@@ -178,6 +178,34 @@
         <div id="fav-list" class="fav-list"></div>
       </div>
 
+      <!-- WiFi group -->
+      <div class="settings-group" id="wifi-group">
+        <div class="settings-group-title">WiFi</div>
+        <div class="settings-card">
+          <p class="settings-group-desc" id="wifi-status-line">Checking…</p>
+          <div class="settings-rows">
+            <div class="setting-row">
+              <label for="wifi-ssid">Network name</label>
+              <div class="input-wrap">
+                <input type="text" id="wifi-ssid" autocomplete="off" spellcheck="false" placeholder="e.g. MyHomeWiFi">
+              </div>
+            </div>
+            <div class="setting-row">
+              <label for="wifi-pass">Password</label>
+              <div class="input-wrap">
+                <input type="password" id="wifi-pass" autocomplete="off" placeholder="Leave blank if open">
+              </div>
+            </div>
+          </div>
+          <div id="wifi-scan-results" class="wifi-scan-results hidden"></div>
+          <div class="wifi-actions">
+            <button class="btn-secondary" id="wifi-scan-btn" onclick="wifiScan()">Scan</button>
+            <button class="btn-update" id="wifi-save-btn" onclick="wifiSave()">Save &amp; Connect</button>
+          </div>
+          <p class="wifi-note" id="wifi-save-status"></p>
+        </div>
+      </div>
+
       <!-- Calibration group -->
       <div class="settings-group">
         <div class="settings-group-title">Probe Calibration</div>
@@ -331,7 +359,7 @@
   </div>
 
   <!-- ── History detail ─────────────────────────────────────────── -->
-  <div class="detail-overlay" id="detail-overlay" onclick="closeHistoryDetail()"></div>
+  <div class="detail-overlay" id="detail-overlay" onclick="if(event.target===this)closeHistoryDetail()"></div>
   <div class="detail-modal" id="detail-modal">
     <div class="detail-header">
       <button class="detail-back" onclick="closeHistoryDetail()">‹ Back</button>

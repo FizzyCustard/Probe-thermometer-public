@@ -53,23 +53,23 @@ function chartDatasets() {
   const { meatTarget, grillLow, grillHigh } = settings;
   const len = meatHistory.length;
   return [
-    makeLine('Meat',  meatHistory.map(d => toDisplay(d.c)),  '#ff4d8d', 'rgba(255,77,141,0.08)'),
-    makeLine('Grill', grillHistory.map(d => toDisplay(d.c)), 'rgba(255,255,255,0.7)', null),
-    makeDash('Meat target', Array(len).fill(toDisplay(meatTarget)), 'rgba(255,77,141,0.4)'),
-    makeDash('Grill low',   Array(len).fill(toDisplay(grillLow)),   'rgba(255,200,74,0.35)'),
-    makeDash('Grill high',  Array(len).fill(toDisplay(grillHigh)),  'rgba(255,200,74,0.35)'),
+    { ...makeLine('Meat',  meatHistory.map(d => toDisplay(d.c)),  '#ff4d8d', 'rgba(255,77,141,0.08)'), yAxisID: 'y'  },
+    { ...makeLine('Grill', grillHistory.map(d => toDisplay(d.c)), 'rgba(255,255,255,0.7)', null),       yAxisID: 'y2' },
+    { ...makeDash('Meat target', Array(len).fill(toDisplay(meatTarget)), 'rgba(255,77,141,0.4)'),        yAxisID: 'y'  },
+    { ...makeDash('Grill low',   Array(len).fill(toDisplay(grillLow)),   'rgba(255,200,74,0.35)'),       yAxisID: 'y2' },
+    { ...makeDash('Grill high',  Array(len).fill(toDisplay(grillHigh)),  'rgba(255,200,74,0.35)'),       yAxisID: 'y2' },
   ];
 }
 
-function chartYBounds() {
-  return unit === 'F'
-    ? { min: 60,  max: 430 }
-    : { min: 0,   max: 220 };
+function chartYBoundsMeat() {
+  return unit === 'F' ? { min: 32, max: 320 } : { min: 0, max: 160 };
+}
+function chartYBoundsGrill() {
+  return unit === 'F' ? { min: 32, max: 610 } : { min: 0, max: 320 };
 }
 
 function initChart() {
   const ctx = document.getElementById('chart').getContext('2d');
-  const bounds = chartYBounds();
   chart = new Chart(ctx, {
     type: 'line',
     data: {
@@ -88,12 +88,25 @@ function initChart() {
           ticks:  { color: '#444', maxTicksLimit: 7, font: { size: 11 } },
         },
         y: {
+          position: 'left',
           border: { display: false },
           grid:   { color: 'rgba(255,255,255,0.04)' },
-          min: bounds.min,
-          max: bounds.max,
+          min: chartYBoundsMeat().min,
+          max: chartYBoundsMeat().max,
           ticks: {
-            color: '#444',
+            color: 'rgba(255,77,141,0.6)',
+            font: { size: 11 },
+            callback: v => v + unitLabel(),
+          },
+        },
+        y2: {
+          position: 'right',
+          border: { display: false },
+          grid:   { drawOnChartArea: false },
+          min: chartYBoundsGrill().min,
+          max: chartYBoundsGrill().max,
+          ticks: {
+            color: 'rgba(255,255,255,0.35)',
             font: { size: 11 },
             callback: v => v + unitLabel(),
           },
@@ -132,7 +145,6 @@ function initChart() {
 
 function rebuildChart() {
   const { meatTarget, grillLow, grillHigh } = settings;
-  const bounds = chartYBounds();
   const len = meatHistory.length;
 
   // Update in-place so Chart.js doesn't tear down and recreate dataset
@@ -144,9 +156,12 @@ function rebuildChart() {
   chart.data.datasets[3].data = Array(len).fill(toDisplay(grillLow));
   chart.data.datasets[4].data = Array(len).fill(toDisplay(grillHigh));
 
-  chart.options.scales.y.min = bounds.min;
-  chart.options.scales.y.max = bounds.max;
-  chart.options.scales.y.ticks.callback = v => v + unitLabel();
+  chart.options.scales.y.min  = chartYBoundsMeat().min;
+  chart.options.scales.y.max  = chartYBoundsMeat().max;
+  chart.options.scales.y.ticks.callback  = v => v + unitLabel();
+  chart.options.scales.y2.min = chartYBoundsGrill().min;
+  chart.options.scales.y2.max = chartYBoundsGrill().max;
+  chart.options.scales.y2.ticks.callback = v => v + unitLabel();
   chart.options.plugins.tooltip.callbacks.label =
     ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}${unitLabel()}`;
 
@@ -339,6 +354,10 @@ function closeSettings() {
   document.getElementById('settings-sheet').classList.remove('open');
   document.getElementById('settings-sheet').setAttribute('aria-hidden', 'true');
   document.getElementById('settings-overlay').classList.remove('open');
+  const passField = document.getElementById('wifi-pass');
+  if (passField) passField.value = '';
+  const scanResults = document.getElementById('wifi-scan-results');
+  if (scanResults) scanResults.classList.add('hidden');
 }
 
 // ── Settings ─────────────────────────────────────────────────────────────────
@@ -488,11 +507,13 @@ function connectWS() {
     let data;
     try { data = JSON.parse(e.data); } catch { return; }
 
-    if (data.type === 'cal_reading') { handleCalReading(data); return; }
-    if (data.type === 'cal_saved')   { handleCalSaved(data);   return; }
-    if (data.type === 'config')      { handleConfig(data);      return; }
-    if (data.type === 'cook_list')   { handleCookList(data);    return; }
-    if (data.type === 'cook_data')   { handleCookData(data);    return; }
+    if (data.type === 'cal_reading')   { handleCalReading(data);   return; }
+    if (data.type === 'cal_saved')     { handleCalSaved(data);     return; }
+    if (data.type === 'config')        { handleConfig(data);        return; }
+    if (data.type === 'cook_list')     { handleCookList(data);      return; }
+    if (data.type === 'cook_data')     { handleCookData(data);      return; }
+    if (data.type === 'wifi_networks') { handleWifiNetworks(data);  return; }
+    if (data.type === 'wifi_saved')    { handleWifiSaved(data);     return; }
     if (data.type === 'cook_started' || data.type === 'cook_stopped') return;
 
     if (!data.meat || !data.grill) return;
@@ -502,6 +523,9 @@ function connectWS() {
       window.__cookState.active = data.cook_active;
       if (data.cook_name) window.__cookState.name = data.cook_name;
     }
+
+    // AP mode flag — show setup banner
+    if (data.ap_mode) setAPModeBanner(true);
 
     // Temperature broadcast from firmware (null = probe not connected)
     const meatC  = data.meat.c  != null ? parseFloat(data.meat.c)  : null;
@@ -525,6 +549,14 @@ function connectWS() {
 
   wsSocket.addEventListener('close', () => {
     setConnState('offline');
+    // If wifi save was in-flight when the connection dropped, unblock the button
+    const wifiBtn = document.getElementById('wifi-save-btn');
+    if (wifiBtn && wifiBtn.disabled && wifiBtn.textContent === 'Saving…') {
+      wifiBtn.textContent = 'Save & Connect';
+      wifiBtn.disabled = false;
+      const wifiStatus = document.getElementById('wifi-save-status');
+      if (wifiStatus) wifiStatus.textContent = 'Connection lost — please try again.';
+    }
     scheduleReconnect();
   });
   wsSocket.addEventListener('error', () => { /* close fires next */ });
@@ -596,6 +628,9 @@ function handleConfig(data) {
   } else if (data.cook_active === false && window.__cookState) {
     window.__cookState.active = false;
   }
+
+  if (data.ap_mode) setAPModeBanner(true);
+  updateWifiStatusLine();
 }
 
 function handleCookData(data) {
@@ -623,13 +658,16 @@ function handleCookList(data) {
     name:       c.name   || c.file,
     preset:     c.preset || null,
     startedAt:  c.started_at ? new Date(c.started_at).getTime() : 0,
-    duration:   (c.stopped_at && c.started_at)
-                  ? Math.round((new Date(c.stopped_at) - new Date(c.started_at)) / 1000)
-                  : (c.duration_s || 0),
+    duration: (() => {
+      const d = (c.stopped_at && c.started_at)
+        ? Math.round((new Date(c.stopped_at) - new Date(c.started_at)) / 1000)
+        : NaN;
+      return isFinite(d) && d > 0 ? d : (c.duration_s || 0);
+    })(),
     targets: {
-      meatTarget: c.meat_target_c || 74,
-      grillLow:   c.grill_low_c   || 160,
-      grillHigh:  c.grill_high_c  || 200,
+      meatTarget: c.meat_target_c != null ? c.meat_target_c : 74,
+      grillLow:   c.grill_low_c   != null ? c.grill_low_c   : 160,
+      grillHigh:  c.grill_high_c  != null ? c.grill_high_c  : 200,
     },
     peakMeat:     null,
     peakGrill:    null,
@@ -764,5 +802,96 @@ function calculateCoeffs(probe) {
       points:    points.map(p => ({ temp_c: p.tempC, resistance: p.resistance })),
       timestamp: new Date().toISOString(),
     }));
+  }
+}
+
+// ── WiFi setup ────────────────────────────────────────────────────────────────
+
+let _apMode = false;
+
+function setAPModeBanner(on) {
+  _apMode = on;
+  const banner = document.getElementById('banner');
+  const msg    = document.getElementById('banner-msg');
+  if (!banner || !msg) return;
+  if (on) {
+    msg.textContent = 'Device is in setup mode — open Settings to connect to WiFi.';
+    banner.classList.remove('hidden');
+  }
+}
+
+function updateWifiStatusLine() {
+  const el = document.getElementById('wifi-status-line');
+  if (!el) return;
+  el.textContent = _apMode
+    ? 'Not connected to WiFi. Enter your network details below.'
+    : 'Connected. Enter new details to switch networks.';
+}
+
+function wifiScan() {
+  if (!isLive() || !wsSocket) return;
+  const btn = document.getElementById('wifi-scan-btn');
+  if (btn) { btn.textContent = 'Scanning…'; btn.disabled = true; }
+  wsSocket.send(JSON.stringify({ type: 'wifi_scan' }));
+}
+
+function handleWifiNetworks(data) {
+  const btn = document.getElementById('wifi-scan-btn');
+  if (btn) { btn.textContent = 'Scan'; btn.disabled = false; }
+
+  const container = document.getElementById('wifi-scan-results');
+  if (!container || !Array.isArray(data.networks)) return;
+
+  container.innerHTML = '';
+  if (data.networks.length === 0) {
+    const p = document.createElement('p');
+    p.className = 'wifi-scan-empty';
+    p.textContent = 'No networks found';
+    container.appendChild(p);
+  } else {
+    const sorted = [...data.networks].sort((a, b) => b.rssi - a.rssi);
+    sorted.forEach(n => {
+      const chip = document.createElement('button');
+      chip.className = 'wifi-network-chip';
+      chip.textContent = n.ssid;
+      const rssiSpan = document.createElement('span');
+      rssiSpan.className = 'wifi-rssi';
+      rssiSpan.textContent = ` ${n.rssi} dBm`;
+      chip.appendChild(rssiSpan);
+      chip.addEventListener('click', () => wifiSelectNetwork(n.ssid));
+      container.appendChild(chip);
+    });
+  }
+  container.classList.remove('hidden');
+}
+
+function wifiSelectNetwork(ssid) {
+  const input = document.getElementById('wifi-ssid');
+  if (input) { input.value = ssid; }
+  document.getElementById('wifi-scan-results').classList.add('hidden');
+  document.getElementById('wifi-pass').focus();
+}
+
+function wifiSave() {
+  const ssid = (document.getElementById('wifi-ssid').value || '').trim();
+  const pass =  document.getElementById('wifi-pass').value || '';
+  if (!ssid) { alert('Please enter a network name.'); return; }
+  if (!isLive() || !wsSocket) return;
+
+  const btn = document.getElementById('wifi-save-btn');
+  if (btn) { btn.textContent = 'Saving…'; btn.disabled = true; }
+
+  wsSocket.send(JSON.stringify({ type: 'wifi_config', ssid, password: pass }));
+}
+
+function handleWifiSaved(data) {
+  const el  = document.getElementById('wifi-save-status');
+  const btn = document.getElementById('wifi-save-btn');
+  if (data.saved) {
+    if (el)  el.textContent = 'Saved — device is restarting…';
+    if (btn) { btn.textContent = 'Restarting…'; btn.disabled = true; }
+  } else {
+    if (el)  el.textContent = 'Save failed — check the device SD card.';
+    if (btn) { btn.textContent = 'Save & Connect'; btn.disabled = false; }
   }
 }

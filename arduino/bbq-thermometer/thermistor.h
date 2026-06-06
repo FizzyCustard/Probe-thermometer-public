@@ -48,6 +48,7 @@ float resistanceToCelsius(float resistance, uint8_t probeIndex) {
   float L = log(resistance);
   const SHCoeffs& c = probeCoeffs[probeIndex];
   float invT = c.A + c.B * L + c.C * L * L * L;
+  if (invT <= 0.0f) return NAN;
   return (1.0f / invT) - 273.15f;
 }
 

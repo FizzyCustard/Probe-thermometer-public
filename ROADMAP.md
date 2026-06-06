@@ -4,67 +4,60 @@ A place to capture ideas and future features before they become code.
 
 ---
 
-## Cook History
+## ✅ Cook History
 
 **Goal:** Save a complete record of each cook to the SD card so previous sessions can be browsed and replayed.
 
-### What's needed
-
-- **Start / Stop cook button** in the web UI
-- On Start: create a new dated session file on the SD card (e.g. `/cooks/2025-07-14_pulled-pork.json` or `.csv`)
-- On Stop: close the session and write a summary (duration, peak temps, target hit time)
-- Log entries written at the existing `LOG_INTERVAL_MS` cadence, tied to the active session
-- Cook history screen in the web UI: list past sessions, tap one to view a replay chart
-
-### SD file structure idea
-
-```
-/cooks/
-  2025-07-14T14-30_cook.csv    ← timestamped per session
-  2025-07-14T14-30_meta.json   ← summary: name, notes, duration, targets
-```
+**Completed.** Cook sessions are written to `/BBQ/cooks/cook_YYYY-MM-DDTHH-MM-SS.csv` on the SD card. Temperature samples are logged every 30 seconds. The history screen lists all past sessions fetched from the SD card on connect, and tapping a session opens a detail view with a replay chart.
 
 ---
 
-## Favourites
+## ✅ Favourites
 
 **Goal:** Save the settings from a great cook so it can be recreated exactly.
 
-- Give a cook a name at the end ("Sunday brisket")
-- Saves: meat target, grill range, probe coefficients used, any notes
-- Favourites list in the UI — tap one to load those settings instantly
-- Stored in `/favourites.json` on the SD card
+**Completed.** Favourites are saved to `/BBQ/config/favourites.csv` on the SD card. The UI shows a favourites list; tapping one loads the name, meat target, grill range, and preset instantly. Favourites can be saved from the Start Cook dialog or after a cook, and deleted from the list.
 
 ---
 
-## Cook Notes
+## ✅ Cook Notes
 
 **Goal:** Attach free-text notes to a cook session (what rub, wood, weather, tweaks).
 
-- Notes field in the Start Cook dialog
-- Can also add mid-cook notes (timestamped entries appended to the session)
-- Shown alongside the history chart when reviewing a past cook
+**Completed.** A notes field appears in the Start Cook dialog for an opening note. Mid-cook notes can be added at any time; each is timestamped and appended to the cook's CSV file as `#note` entries. Notes are shown in a timeline alongside the active cook bar.
 
 ---
 
-## Preset Temperatures
+## ✅ Preset Temperatures
 
 **Goal:** Quick-select common target temperatures instead of typing a number.
 
-Suggested presets (all in °C, UI converts to °F if needed):
+**Completed.** A scrollable chip row appears above the meat target input. Tapping a chip fills the input and highlights the selection. Presets are loaded from the device on connect and can be extended. Available presets:
 
 | Preset | Meat target |
 |---|---|
-| Beef — rare | 52 |
-| Beef — medium rare | 57 |
-| Beef — medium | 63 |
-| Beef — well done | 71 |
-| Lamb — medium rare | 57 |
-| Lamb — medium | 63 |
-| Pork — safe minimum | 71 |
-| Chicken — safe minimum | 74 |
-| Brisket / pulled pork | 95 |
+| Beef — rare | 52 °C |
+| Beef — medium rare | 57 °C |
+| Beef — medium | 63 °C |
+| Beef — well done | 71 °C |
+| Lamb — medium rare | 57 °C |
+| Lamb — medium | 63 °C |
+| Pork — safe minimum | 71 °C |
+| Chicken — safe minimum | 74 °C |
+| Brisket / pulled pork | 95 °C |
 
-- Shown as a scrollable chip row above the meat target input in the Settings sheet
-- Tapping a chip fills the meat target input; user still presses Update Targets to apply
-- Chips are editable / user can add their own (stored in `localStorage` or SD)
+---
+
+## ✅ Cook State Persistence (new tab / page refresh)
+
+**Goal:** Opening the device in a new browser tab or refreshing the page should show the same active cook state as the original tab.
+
+**Completed** (commit `dcb7ba3`). The device now includes full active cook state in the config payload sent to every new WebSocket client on connect. The browser restores cook name, elapsed time, targets, and preset from this immediately on load. See `COOK-STATE-NOTES.md` for full details and caveats.
+
+---
+
+## ✅ Dual Y-Axis Chart
+
+**Goal:** Meat and grill temperatures occupy very different ranges — plotting them on a shared axis cramped the meat line into the bottom quarter of the chart.
+
+**Completed** (commit `071c1d1`). The live chart now uses two independent Y-axes: meat on the left (0–160 °C), grill on the right (0–320 °C). Tick colours match the probe line colours. Both axes rescale correctly when switching between °C and °F.

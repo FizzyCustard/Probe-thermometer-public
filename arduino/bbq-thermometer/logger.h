@@ -47,10 +47,11 @@ void logReading(String filename, String timestamp, float probe1C, float probe2C)
   File f = SD.open(filename.c_str(), FILE_WRITE);
   if (!f) return;
   if (newFile) f.println("timestamp,meat_c,grill_c");
+  char b1[12], b2[12];
   f.printf("%s,%s,%s\n",
            timestamp.c_str(),
-           isnan(probe1C) ? "" : String(probe1C, 1).c_str(),
-           isnan(probe2C) ? "" : String(probe2C, 1).c_str());
+           isnan(probe1C) ? "" : dtostrf(probe1C, 1, 1, b1),
+           isnan(probe2C) ? "" : dtostrf(probe2C, 1, 1, b2));
   f.close();
 }
 

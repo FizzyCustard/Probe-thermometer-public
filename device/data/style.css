@@ -1653,3 +1653,66 @@ main > * {
   background: var(--primary-dim);
   color: var(--primary);
 }
+
+/* ── WiFi settings section ─────────────────────────────────────────────────── */
+
+.wifi-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.btn-secondary {
+  flex: 0 0 auto;
+  padding: 10px 16px;
+  background: rgba(255,255,255,0.06);
+  color: #ccc;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.btn-secondary:disabled { opacity: 0.45; cursor: default; }
+.btn-secondary:not(:disabled):active { background: rgba(255,255,255,0.12); }
+
+.wifi-scan-results {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.wifi-scan-results.hidden { display: none; }
+
+.wifi-network-chip {
+  padding: 6px 12px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 20px;
+  color: #ddd;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.wifi-network-chip:active { background: rgba(255,255,255,0.12); }
+
+.wifi-rssi {
+  font-size: 11px;
+  color: #666;
+  margin-left: 4px;
+}
+
+.wifi-scan-empty {
+  font-size: 13px;
+  color: #666;
+  margin: 4px 0 0;
+}
+
+.wifi-note {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #888;
+  min-height: 18px;
+}

@@ -75,10 +75,11 @@ void cookAppendReading(float meatC, float grillC) {
   if (isnan(meatC) && isnan(grillC)) return;  // nothing to log
   File f = SD.open(activeCook.filename, FILE_WRITE);
   if (!f) return;
+  char mBuf[12], gBuf[12];
   f.printf("%u,%s,%s\n",
            cookElapsedSeconds(),
-           isnan(meatC)  ? "" : String(meatC,  1).c_str(),
-           isnan(grillC) ? "" : String(grillC, 1).c_str());
+           isnan(meatC)  ? "" : dtostrf(meatC,  1, 1, mBuf),
+           isnan(grillC) ? "" : dtostrf(grillC, 1, 1, gBuf));
   f.close();
 }
 
@@ -87,7 +88,11 @@ void cookAppendNote(const char* text, float meatC) {
   if (!activeCook.active) return;
   File f = SD.open(activeCook.filename, FILE_WRITE);
   if (!f) return;
-  f.printf("#note,%u,%s,%.1f\n", cookElapsedSeconds(), text, meatC);
+  if (isnan(meatC)) {
+    f.printf("#note,%u,%s,\n", cookElapsedSeconds(), text);
+  } else {
+    f.printf("#note,%u,%s,%.1f\n", cookElapsedSeconds(), text, meatC);
+  }
   f.close();
   Serial.printf("Note added at %us: %s\n", cookElapsedSeconds(), text);
 }
