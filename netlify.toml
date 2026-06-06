@@ -1,2 +1,2 @@
 [build]
-  publish = "data"
+  publish = "device/data"
