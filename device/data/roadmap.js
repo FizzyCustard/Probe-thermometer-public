@@ -214,7 +214,7 @@ function renderCookBar() {
     bar.innerHTML = `
       <div class="cook-bar-info">
         <span class="cook-bar-label">● Live cook</span>
-        <span class="cook-bar-name">${s.name || 'Untitled cook'}</span>
+        <span class="cook-bar-name">${escapeHtml(s.name || 'Untitled cook')}</span>
         <span class="cook-bar-time" id="cook-elapsed">${formatDuration(elapsed)} elapsed</span>
       </div>
       <div class="cook-bar-actions">
@@ -629,7 +629,7 @@ function openHistoryDetail(id) {
   document.getElementById('detail-targets').innerHTML = `
     <div class="dialog-target-row"><span>Meat target</span><span>${unit === 'F' ? Math.round(cToF(c.targets.meatTarget)) : c.targets.meatTarget}°${unit}</span></div>
     <div class="dialog-target-row"><span>Grill range</span><span>${unit === 'F' ? Math.round(cToF(c.targets.grillLow)) : c.targets.grillLow}–${unit === 'F' ? Math.round(cToF(c.targets.grillHigh)) : c.targets.grillHigh}°${unit}</span></div>
-    ${c.preset ? `<div class="dialog-target-row"><span>Preset</span><span>${c.preset}</span></div>` : ''}
+    ${c.preset ? `<div class="dialog-target-row"><span>Preset</span><span>${escapeHtml(c.preset)}</span></div>` : ''}
   `;
 
   // Replay chart — synthesize a reasonable curve from the metadata

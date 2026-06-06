@@ -355,7 +355,7 @@
   </div>
 
   <!-- ── History detail ─────────────────────────────────────────── -->
-  <div class="detail-overlay" id="detail-overlay" onclick="closeHistoryDetail()"></div>
+  <div class="detail-overlay" id="detail-overlay" onclick="if(event.target===this)closeHistoryDetail()"></div>
   <div class="detail-modal" id="detail-modal">
     <div class="detail-header">
       <button class="detail-back" onclick="closeHistoryDetail()">‹ Back</button>

@@ -321,6 +321,10 @@ function closeSettings() {
   document.getElementById('settings-sheet').classList.remove('open');
   document.getElementById('settings-sheet').setAttribute('aria-hidden', 'true');
   document.getElementById('settings-overlay').classList.remove('open');
+  const passField = document.getElementById('wifi-pass');
+  if (passField) passField.value = '';
+  const scanResults = document.getElementById('wifi-scan-results');
+  if (scanResults) scanResults.classList.add('hidden');
 }
 
 // ── Settings ─────────────────────────────────────────────────────────────────
