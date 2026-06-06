@@ -401,8 +401,9 @@ function applySettings() {
 // ── WebSocket (live device) ──────────────────────────────────────────────────
 
 let wsSocket       = null;
-let connState      = 'offline'; // 'live' | 'stale' | 'offline'
+let connState      = 'offline'; // 'live' | 'stale' | 'offline' | 'demo'
 let lastChartAdd   = 0;
+let simElapsed     = 0;
 let lastMessageTs  = 0;
 let reconnectTimer = null;
 let reconnectStep  = 0;
@@ -417,6 +418,11 @@ function isLive() { return connState === 'live'; }
 
 function setConnState(state) {
   if (state === connState) return;
+  // Transitioning live → demo history is wiped so real data starts fresh
+  if (state === 'live' && connState === 'demo') {
+    meatHistory = []; grillHistory = []; simElapsed = 0;
+    if (chart) rebuildChart();
+  }
   connState = state;
 
   const pill = document.getElementById('connection-pill');
@@ -424,9 +430,11 @@ function setConnState(state) {
     pill.classList.toggle('live',    state === 'live');
     pill.classList.toggle('stale',   state === 'stale');
     pill.classList.toggle('offline', state === 'offline');
+    pill.classList.toggle('demo',    state === 'demo');
     pill.textContent =
       state === 'live'  ? 'LIVE' :
       state === 'stale' ? 'STALE · TAP TO RECONNECT' :
+      state === 'demo'  ? 'DEMO' :
                           'OFFLINE · TAP TO RECONNECT';
   }
 
@@ -469,7 +477,11 @@ function scheduleReconnect() {
   clearTimeout(reconnectTimer);
   const delay = RECONNECT_DELAYS_MS[Math.min(reconnectStep, RECONNECT_DELAYS_MS.length - 1)];
   reconnectStep++;
-  reconnectTimer = setTimeout(connectWS, delay);
+  reconnectTimer = setTimeout(() => {
+    // After the first backoff, fall into demo mode while continuing to retry
+    if (connState !== 'live') enterDemoMode();
+    connectWS();
+  }, delay);
 }
 
 function manualReconnect() {
@@ -680,6 +692,56 @@ function handleCookList(data) {
   if (el) el.textContent = window.__cookState.history.length || '';
 }
 
+// ── Demo simulation (runs when no device is reachable, e.g. Netlify preview) ──
+
+function simMeat(s) {
+  const minElapsed = 60 + s / 60;
+  const base = Math.min(18 + minElapsed * 0.5, 74);
+  const noise = Math.sin(s * 0.08) * 0.5 + Math.cos(s * 0.15) * 0.3;
+  return Math.round((base + noise) * 10) / 10;
+}
+
+function simGrill(s) {
+  const slow  = Math.sin(s * 0.010) * 18;
+  const med   = Math.cos(s * 0.035) * 8;
+  const noise = Math.sin(s * 0.100) * 2;
+  return Math.round((178 + slow + med + noise) * 10) / 10;
+}
+
+function buildHistory() {
+  meatHistory  = [];
+  grillHistory = [];
+  const now = Date.now();
+  for (let s = -3600; s <= 0; s += 30) {
+    const ts = new Date(now + s * 1000);
+    meatHistory.push({ ts, c: simMeat(s) });
+    grillHistory.push({ ts, c: simGrill(s) });
+  }
+}
+
+function enterDemoMode() {
+  if (connState === 'live' || connState === 'demo') return;
+  buildHistory();
+  setConnState('demo');
+  if (chart) rebuildChart();
+}
+
+function tickSim() {
+  if (connState !== 'demo') return;
+  simElapsed++;
+  const meatC  = simMeat(simElapsed);
+  const grillC = simGrill(simElapsed);
+  if (simElapsed % 30 === 0) {
+    const ts = new Date();
+    meatHistory.push({ ts, c: meatC });
+    grillHistory.push({ ts, c: grillC });
+    if (meatHistory.length  > 120) meatHistory.shift();
+    if (grillHistory.length > 120) grillHistory.shift();
+    if (chart) appendChartPoint(meatC, grillC);
+  }
+  updateUI(meatC, grillC);
+}
+
 // ── Init ─────────────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -702,6 +764,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   connectWS();
   setInterval(tickConnState, 1000);
+  setInterval(tickSim, 1000);
 });
 
 // ── Calibration ──────────────────────────────────────────────────────────────
@@ -829,6 +892,19 @@ function updateWifiStatusLine() {
 }
 
 function wifiScan() {
+  if (connState === 'demo') {
+    const btn = document.getElementById('wifi-scan-btn');
+    if (btn) { btn.textContent = 'Scanning…'; btn.disabled = true; }
+    setTimeout(() => {
+      handleWifiNetworks({ networks: [
+        { ssid: 'MyHomeNetwork',   rssi: -42 },
+        { ssid: 'NeighboursWiFi',  rssi: -68 },
+        { ssid: 'VM1234567',       rssi: -71 },
+        { ssid: 'DIRECT-PrinterHP', rssi: -85 },
+      ]});
+    }, 1500);
+    return;
+  }
   if (!isLive() || !wsSocket) return;
   const btn = document.getElementById('wifi-scan-btn');
   if (btn) { btn.textContent = 'Scanning…'; btn.disabled = true; }
@@ -876,11 +952,21 @@ function wifiSave() {
   const ssid = (document.getElementById('wifi-ssid').value || '').trim();
   const pass =  document.getElementById('wifi-pass').value || '';
   if (!ssid) { alert('Please enter a network name.'); return; }
-  if (!isLive() || !wsSocket) return;
 
+  if (connState === 'demo') {
+    const btn = document.getElementById('wifi-save-btn');
+    const el  = document.getElementById('wifi-save-status');
+    if (btn) { btn.textContent = 'Saving…'; btn.disabled = true; }
+    setTimeout(() => {
+      if (el)  el.textContent = 'Demo mode — credentials not sent to a real device.';
+      if (btn) { btn.textContent = 'Save & Connect'; btn.disabled = false; }
+    }, 1200);
+    return;
+  }
+
+  if (!isLive() || !wsSocket) return;
   const btn = document.getElementById('wifi-save-btn');
   if (btn) { btn.textContent = 'Saving…'; btn.disabled = true; }
-
   wsSocket.send(JSON.stringify({ type: 'wifi_config', ssid, password: pass }));
 }
 
