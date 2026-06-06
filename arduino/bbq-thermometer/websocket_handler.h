@@ -5,6 +5,7 @@
 #include "thermistor.h"
 #include "logger.h"
 #include "cook_session.h"
+#include "wifi_manager.h"
 
 extern AsyncWebSocket ws;
 extern float meatTarget;
@@ -203,6 +204,43 @@ void onWsMessage(AsyncWebSocketClient* client, String msg) {
     return;
   }
 
+  // ── WiFi: scan for nearby networks ───────────────────────────────────────
+  if (strcmp(type, "wifi_scan") == 0) {
+    int n = WiFi.scanNetworks();
+    JsonDocument resp;
+    resp["type"] = "wifi_networks";
+    JsonArray nets = resp["networks"].to<JsonArray>();
+    for (int i = 0; i < n; i++) {
+      JsonObject net = nets.add<JsonObject>();
+      net["ssid"] = WiFi.SSID(i);
+      net["rssi"] = WiFi.RSSI(i);
+    }
+    WiFi.scanDelete();
+    String out;
+    serializeJson(resp, out);
+    client->text(out);
+    return;
+  }
+
+  // ── WiFi: save credentials and restart ───────────────────────────────────
+  if (strcmp(type, "wifi_config") == 0) {
+    const char* ssid = doc["ssid"]     | "";
+    const char* pass = doc["password"] | "";
+    bool saved = saveWifiCreds(ssid, pass);
+    JsonDocument resp;
+    resp["type"]       = "wifi_saved";
+    resp["saved"]      = saved;
+    resp["restarting"] = saved;
+    String out;
+    serializeJson(resp, out);
+    client->text(out);
+    if (saved) {
+      delay(1000);
+      ESP.restart();
+    }
+    return;
+  }
+
   // ── Calibration: apply and save coefficients sent by browser ─────────────
   if (strcmp(type, "cal_save") == 0) {
     uint8_t probe = doc["probe"].as<uint8_t>();
@@ -282,6 +320,8 @@ static void sendConfig(AsyncWebSocketClient* client) {
     doc["cook_active"] = false;
   }
 
+  if (isAPMode()) doc["ap_mode"] = true;
+
   String out;
   serializeJson(doc, out);
   client->text(out);
@@ -341,6 +381,8 @@ void wsBroadcast(float meatC, float grillC, String timestamp) {
   } else {
     doc["cook_active"] = false;
   }
+
+  if (isAPMode()) doc["ap_mode"] = true;
 
   String out;
   serializeJson(doc, out);

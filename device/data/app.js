@@ -451,10 +451,12 @@ function connectWS() {
     let data;
     try { data = JSON.parse(e.data); } catch { return; }
 
-    if (data.type === 'cal_reading') { handleCalReading(data); return; }
-    if (data.type === 'cal_saved')   { handleCalSaved(data);   return; }
-    if (data.type === 'config')      { handleConfig(data);      return; }
-    if (data.type === 'cook_list')   { handleCookList(data);    return; }
+    if (data.type === 'cal_reading')   { handleCalReading(data);   return; }
+    if (data.type === 'cal_saved')     { handleCalSaved(data);     return; }
+    if (data.type === 'config')        { handleConfig(data);        return; }
+    if (data.type === 'cook_list')     { handleCookList(data);      return; }
+    if (data.type === 'wifi_networks') { handleWifiNetworks(data);  return; }
+    if (data.type === 'wifi_saved')    { handleWifiSaved(data);     return; }
     if (data.type === 'cook_started' || data.type === 'cook_stopped') return;
 
     if (!data.meat || !data.grill) return;
@@ -464,6 +466,9 @@ function connectWS() {
       window.__cookState.active = data.cook_active;
       if (data.cook_name) window.__cookState.name = data.cook_name;
     }
+
+    // AP mode flag — show setup banner
+    if (data.ap_mode) setAPModeBanner(true);
 
     // Temperature broadcast from firmware (null = probe not connected)
     const meatC  = data.meat.c  != null ? parseFloat(data.meat.c)  : null;
@@ -557,6 +562,9 @@ function handleConfig(data) {
   } else if (data.cook_active === false && window.__cookState) {
     window.__cookState.active = false;
   }
+
+  if (data.ap_mode) setAPModeBanner(true);
+  updateWifiStatusLine();
 }
 
 function handleCookList(data) {
@@ -707,5 +715,84 @@ function calculateCoeffs(probe) {
       points:    points.map(p => ({ temp_c: p.tempC, resistance: p.resistance })),
       timestamp: new Date().toISOString(),
     }));
+  }
+}
+
+// ── WiFi setup ────────────────────────────────────────────────────────────────
+
+let _apMode = false;
+
+function setAPModeBanner(on) {
+  _apMode = on;
+  const banner = document.getElementById('banner');
+  const msg    = document.getElementById('banner-msg');
+  if (!banner || !msg) return;
+  if (on) {
+    msg.textContent = 'Device is in setup mode — open Settings to connect to WiFi.';
+    banner.classList.remove('hidden');
+  }
+}
+
+function updateWifiStatusLine() {
+  const el = document.getElementById('wifi-status-line');
+  if (!el) return;
+  el.textContent = _apMode
+    ? 'Not connected to WiFi. Enter your network details below.'
+    : 'Connected. Enter new details to switch networks.';
+}
+
+function wifiScan() {
+  if (!isLive() || !wsSocket) return;
+  const btn = document.getElementById('wifi-scan-btn');
+  if (btn) { btn.textContent = 'Scanning…'; btn.disabled = true; }
+  wsSocket.send(JSON.stringify({ type: 'wifi_scan' }));
+}
+
+function handleWifiNetworks(data) {
+  const btn = document.getElementById('wifi-scan-btn');
+  if (btn) { btn.textContent = 'Scan'; btn.disabled = false; }
+
+  const container = document.getElementById('wifi-scan-results');
+  if (!container || !Array.isArray(data.networks)) return;
+
+  if (data.networks.length === 0) {
+    container.innerHTML = '<p class="wifi-scan-empty">No networks found</p>';
+  } else {
+    const sorted = [...data.networks].sort((a, b) => b.rssi - a.rssi);
+    container.innerHTML = sorted.map(n =>
+      `<button class="wifi-network-chip" onclick="wifiSelectNetwork(${JSON.stringify(n.ssid)})">${n.ssid} <span class="wifi-rssi">${n.rssi} dBm</span></button>`
+    ).join('');
+  }
+  container.classList.remove('hidden');
+}
+
+function wifiSelectNetwork(ssid) {
+  const input = document.getElementById('wifi-ssid');
+  if (input) { input.value = ssid; }
+  document.getElementById('wifi-scan-results').classList.add('hidden');
+  document.getElementById('wifi-pass').focus();
+}
+
+function wifiSave() {
+  const ssid = (document.getElementById('wifi-ssid').value || '').trim();
+  const pass =  document.getElementById('wifi-pass').value || '';
+  if (!ssid) { alert('Please enter a network name.'); return; }
+  if (!isLive() || !wsSocket) return;
+
+  const btn = document.getElementById('wifi-save-btn');
+  if (btn) { btn.textContent = 'Saving…'; btn.disabled = true; }
+
+  wsSocket.send(JSON.stringify({ type: 'wifi_config', ssid, password: pass }));
+}
+
+function handleWifiSaved(data) {
+  const el  = document.getElementById('wifi-save-status');
+  const btn = document.getElementById('wifi-save-btn');
+  if (data.saved) {
+    if (el)  el.textContent = 'Saved — device is restarting…';
+    if (btn) { btn.textContent = 'Restarting…'; btn.disabled = true; }
+  } else {
+    if (el)  el.textContent = 'Save failed — check the device SD card.';
+    if (btn) { btn.textContent = 'Save & Connect'; btn.disabled = false; }
   }
 }

@@ -12,6 +12,7 @@
 #define MAX_FAVS      32
 
 #include "config.h"
+#include "wifi_manager.h"
 #include "thermistor.h"
 #include "logger.h"
 #include "cook_session.h"
@@ -75,20 +76,30 @@ void setup() {
     Serial.println("LittleFS mounted OK");
   }
 
-  // WiFi — blocks until connected
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.printf("Connecting to WiFi (%s)", WIFI_SSID);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
+  // WiFi — try saved credentials, fall back to compiled-in, then AP mode
+  WifiCreds creds;
+  bool connected = false;
+  if (loadWifiCreds(creds)) {
+    connected = connectWifi(creds.ssid, creds.password);
   }
-  Serial.printf("\nConnected — IP: %s\n", WiFi.localIP().toString().c_str());
+  if (!connected && strcmp(WIFI_SSID, "YOUR_SSID") != 0) {
+    connected = connectWifi(WIFI_SSID, WIFI_PASSWORD);
+    if (connected) saveWifiCreds(WIFI_SSID, WIFI_PASSWORD);  // persist for next boot
+  }
+  if (!connected) {
+    startAP();
+  }
 
-  // NTP time sync
-  timeClient.begin();
-  timeClient.forceUpdate();
-  Serial.printf("NTP synced: %s\n", getTimestamp().c_str());
+  // NTP time sync (skipped in AP mode — no internet)
+  if (!isAPMode()) {
+    timeClient.begin();
+    uint32_t ntpStart = millis();
+    while (timeClient.getEpochTime() < 1000000000UL && millis() - ntpStart < 5000) {
+      timeClient.update();
+      delay(200);
+    }
+    Serial.printf("NTP: %s\n", getTimestamp().c_str());
+  }
 
   // ADS1115 over I2C
   Wire.begin();
@@ -121,15 +132,21 @@ void setup() {
   });
 
   server.begin();
-  Serial.printf("\nReady — open http://%s in your browser\n",
-                WiFi.localIP().toString().c_str());
+  if (isAPMode()) {
+    Serial.printf("\nReady — connect to WiFi \"%s\" then open http://%s\n",
+                  AP_SSID, WiFi.softAPIP().toString().c_str());
+  } else {
+    Serial.printf("\nReady — open http://%s in your browser\n",
+                  WiFi.localIP().toString().c_str());
+  }
 }
 
 // ── Loop ──────────────────────────────────────────────────────────────────────
 
 void loop() {
   ws.cleanupClients();
-  timeClient.update();
+  wifiManagerTick();
+  if (!isAPMode()) timeClient.update();
 
   unsigned long now = millis();
 
@@ -147,8 +164,8 @@ void loop() {
     wsBroadcast(tMeat, tGrill, getTimestamp());
   }
 
-  // Append CSV row to SD card every LOG_INTERVAL_MS
-  if (now - lastLog >= LOG_INTERVAL_MS) {
+  // Append CSV row to SD card every LOG_INTERVAL_MS (skipped in AP mode — no valid timestamp)
+  if (!isAPMode() && now - lastLog >= LOG_INTERVAL_MS) {
     lastLog = now;
     logReading(getTodayFilename(getDateStr()), getTimestamp(), tMeat, tGrill);
   }
