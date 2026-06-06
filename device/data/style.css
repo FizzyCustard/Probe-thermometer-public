@@ -1685,10 +1685,17 @@ main > * {
 .wifi-scan-results {
   margin-top: 10px;
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-direction: column;
+  gap: 0;
 }
 .wifi-scan-results.hidden { display: none; }
+.wifi-scan-results:not(.hidden):not(:empty) {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-top: 12px;
+}
 
 .wifi-network-chip {
   padding: 6px 12px;
@@ -1721,3 +1728,77 @@ main > * {
   color: #888;
   min-height: 18px;
 }
+
+/* Status dot */
+.wifi-status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  margin-right: 7px;
+  vertical-align: middle;
+  flex-shrink: 0;
+  transition: background 0.3s;
+}
+.wifi-status-dot[data-state="connected"] { background: var(--success); }
+.wifi-status-dot[data-state="ap"]        { background: var(--warning); }
+
+/* Inline scan button in SSID row */
+.wifi-ssid-row { flex-wrap: nowrap; align-items: center; }
+.wifi-ssid-wrap { flex: 1; min-width: 0; }
+.wifi-ssid-wrap input { width: 100%; text-align: left; }
+.btn-scan-inline { flex-shrink: 0; padding: 8px 12px; font-size: 12px; white-space: nowrap; }
+
+/* Password wrap + show/hide toggle */
+.wifi-pass-wrap { flex: 1; min-width: 0; }
+.wifi-pass-wrap input { width: 100%; text-align: left; }
+.wifi-pass-toggle {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 15px;
+  padding: 0 10px;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.wifi-pass-toggle:hover { opacity: 1; }
+
+/* Vertical network list rows */
+.wifi-network-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 10px 12px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  gap: 10px;
+  transition: background 0.12s;
+}
+.wifi-network-row:last-child { border-bottom: none; }
+.wifi-network-row:hover  { background: rgba(255,255,255,0.05); }
+.wifi-network-row:active { background: rgba(255,255,255,0.10); }
+
+.wifi-network-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+/* Signal bar indicator */
+.wifi-signal-bars { display: inline-flex; align-items: flex-end; gap: 2px; flex-shrink: 0; }
+.wifi-signal-bars .bar-filled { color: var(--success); font-size: 11px; }
+.wifi-signal-bars .bar-empty  { color: var(--text-muted); opacity: 0.35; font-size: 11px; }
