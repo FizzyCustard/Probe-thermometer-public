@@ -820,6 +820,19 @@ function updateWifiStatusLine() {
 }
 
 function wifiScan() {
+  if (connState === 'demo') {
+    const btn = document.getElementById('wifi-scan-btn');
+    if (btn) { btn.textContent = 'Scanning…'; btn.disabled = true; }
+    setTimeout(() => {
+      handleWifiNetworks({ networks: [
+        { ssid: 'MyHomeNetwork',   rssi: -42 },
+        { ssid: 'NeighboursWiFi',  rssi: -68 },
+        { ssid: 'VM1234567',       rssi: -71 },
+        { ssid: 'DIRECT-PrinterHP', rssi: -85 },
+      ]});
+    }, 1500);
+    return;
+  }
   if (!isLive() || !wsSocket) return;
   const btn = document.getElementById('wifi-scan-btn');
   if (btn) { btn.textContent = 'Scanning…'; btn.disabled = true; }
@@ -867,11 +880,21 @@ function wifiSave() {
   const ssid = (document.getElementById('wifi-ssid').value || '').trim();
   const pass =  document.getElementById('wifi-pass').value || '';
   if (!ssid) { alert('Please enter a network name.'); return; }
-  if (!isLive() || !wsSocket) return;
 
+  if (connState === 'demo') {
+    const btn = document.getElementById('wifi-save-btn');
+    const el  = document.getElementById('wifi-save-status');
+    if (btn) { btn.textContent = 'Saving…'; btn.disabled = true; }
+    setTimeout(() => {
+      if (el)  el.textContent = 'Demo mode — credentials not sent to a real device.';
+      if (btn) { btn.textContent = 'Save & Connect'; btn.disabled = false; }
+    }, 1200);
+    return;
+  }
+
+  if (!isLive() || !wsSocket) return;
   const btn = document.getElementById('wifi-save-btn');
   if (btn) { btn.textContent = 'Saving…'; btn.disabled = true; }
-
   wsSocket.send(JSON.stringify({ type: 'wifi_config', ssid, password: pass }));
 }
 
