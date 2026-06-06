@@ -18,7 +18,7 @@ The app has no `<link rel="icon">` and no `manifest.json`. Adding both would imp
 ### Settings button is easy to miss
 The fixed bottom `⚙ Settings` button is a low-contrast ghost pill. Users exploring the UI for the first time can miss it. Giving it a more prominent style or adding a brief tooltip/hint on first visit would reduce friction.
 
-### No light mode
+### No light mode [IGNORE]
 The app is dark-only. Users in bright outdoor environments (which is where BBQs happen) sometimes struggle with dark UIs. A system-preference-aware light mode (`prefers-color-scheme: light`) and/or a manual toggle would help.
 
 ### Connection pill has no visual weight
@@ -65,7 +65,7 @@ The user might change settings and then start a cook — the dialog pre-fills th
 ### No reference lines on the live chart
 The live temperature history chart shows two lines (meat, grill) but no horizontal reference lines for the meat target or the grill low/high bounds. Adding these as dashed annotation lines would let the user see proximity to target without looking away from the chart.
 
-### No zoom or pan on the live chart
+### No zoom or pan on the live chart [Approved]
 The chart is locked to a rolling 60-minute window. If the user wants to inspect a specific period (e.g. right when they added a spritz) they cannot zoom in. Chart.js supports zoom/pan via a plugin; enabling it would make the chart much more useful on longer cooks.
 
 ### Grill and meat use the same Y axis

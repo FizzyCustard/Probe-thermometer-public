@@ -38,6 +38,7 @@ unsigned long lastCookSample = 0;
 AsyncWebServer server(80);
 AsyncWebSocket  ws("/ws");
 Adafruit_ADS1115 ads;
+bool      adsReady = false;   // true once ads.begin() succeeds; gates all reads
 WiFiUDP   ntpUDP;
 NTPClient timeClient(ntpUDP, NTP_SERVER, NTP_UTC_OFFSET_SEC, 60000);
 
@@ -107,8 +108,9 @@ void setup() {
 
   // ADS1115 over I2C
   Wire.begin();
-  if (!ads.begin(ADS1115_I2C_ADDRESS)) {
-    Serial.println("ERROR: ADS1115 not found");
+  adsReady = ads.begin(ADS1115_I2C_ADDRESS);
+  if (!adsReady) {
+    Serial.println("ERROR: ADS1115 not found — probe readings disabled");
     Serial.println("  Check: SDA→D2, SCL→D1, VDD→3.3V, ADDR→GND");
   } else {
     ads.setGain(GAIN_ONE);  // ±4.096 V full scale
@@ -150,6 +152,7 @@ void setup() {
 void loop() {
   ws.cleanupClients();
   wifiManagerTick();
+  wsProcessPending();   // run deferred (heavy) cook-history reads off the async path
   if (!isAPMode()) timeClient.update();
 
   unsigned long now = millis();

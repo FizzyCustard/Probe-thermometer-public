@@ -18,6 +18,15 @@ extern uint8_t   favCount;
 
 // Forward declarations
 static void sendConfig(AsyncWebSocketClient* client);
+static void sendCookList(AsyncWebSocketClient* client);
+static void sendCookData(AsyncWebSocketClient* client, const char* file);
+
+// Single-slot deferred-request queue. The heavy cook-history reads must NOT run
+// inside the async WebSocket callback — they block the TCP stack and can trip the
+// soft watchdog. The message handler records the request here and loop() services
+// it via wsProcessPending(). Single user → newest request wins.
+struct PendingWsRequest { uint8_t kind; uint32_t clientId; char file[64]; };
+static PendingWsRequest pendingReq = { 0, 0, "" };  // kind: 0 none, 1 list, 2 data
 
 // ── Inbound message handler ───────────────────────────────────────────────────
 
@@ -132,65 +141,34 @@ void onWsMessage(AsyncWebSocketClient* client, String msg) {
     return;
   }
 
-  // ── Request cook history list from SD ─────────────────────────────────────
+  // ── Request cook history list from SD (deferred to loop) ──────────────────
   if (strcmp(type, "request_cook_list") == 0) {
-    JsonDocument resp;
-    resp["type"] = "cook_list";
-    JsonArray arr = resp["cooks"].to<JsonArray>();
+    pendingReq.kind     = 1;
+    pendingReq.clientId = client->id();
+    return;
+  }
 
-    const uint8_t MAX_COOK_LIST = 30;
-    uint8_t cookCount = 0;
+  // ── Request full time-series for a single cook (deferred to loop) ─────────
+  if (strcmp(type, "request_cook_data") == 0) {
+    const char* fileReq = doc["file"] | "";
+    size_t flen = strlen(fileReq);
 
-    File dir = SD.open(BBQ_COOKS);
-    if (dir) {
-      while (true) {
-        if (cookCount >= MAX_COOK_LIST) {
-          resp["truncated"] = true;
-          break;
-        }
-        File entry = dir.openNextFile();
-        if (!entry) break;
-        if (entry.isDirectory()) { entry.close(); continue; }
-
-        String fname = String(entry.name());
-        entry.close();
-        if (!fname.startsWith("cook_") || !fname.endsWith(".csv")) continue;
-
-        String fullPath = String(BBQ_COOKS) + "/" + fname;
-        File f = SD.open(fullPath.c_str(), FILE_READ);
-        if (!f) continue;
-
-        JsonObject cook = arr.add<JsonObject>();
-        cook["file"] = fname;
-        uint32_t lastElapsed = 0;
-        cookCount++;
-
-        while (f.available()) {
-          String line = f.readStringUntil('\n');
-          line.trim();
-          if      (line.startsWith("#name,"))          cook["name"]          = line.substring(6);
-          else if (line.startsWith("#preset,"))        cook["preset"]        = line.substring(8);
-          else if (line.startsWith("#meat_target_c,")) cook["meat_target_c"] = line.substring(15).toFloat();
-          else if (line.startsWith("#grill_low_c,"))   cook["grill_low_c"]   = line.substring(13).toFloat();
-          else if (line.startsWith("#grill_high_c,"))  cook["grill_high_c"]  = line.substring(14).toFloat();
-          else if (line.startsWith("#started_at,"))    cook["started_at"]    = line.substring(12);
-          else if (line.startsWith("#stopped_at,"))    cook["stopped_at"]    = line.substring(12);
-          else if (line.length() > 0 && !line.startsWith("#") && !line.startsWith("elapsed")) {
-            int comma = line.indexOf(',');
-            if (comma > 0) lastElapsed = line.substring(0, comma).toInt();
-          }
-        }
-        f.close();
-
-        if (!cook["stopped_at"].is<const char*>())
-          cook["duration_s"] = lastElapsed;
-      }
-      dir.close();
+    // Whitelist filename: cook_<safe-chars>.csv, no path separators or ".."
+    // (cheap, string-only — safe to run here; the file I/O is deferred below)
+    if (flen < 10 || flen > 60) return;
+    if (strncmp(fileReq, "cook_", 5) != 0) return;
+    if (strcmp(fileReq + flen - 4, ".csv") != 0) return;
+    if (strstr(fileReq, "..") != nullptr) return;
+    for (size_t i = 0; i < flen; i++) {
+      char ch = fileReq[i];
+      bool ok = (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+                (ch >= '0' && ch <= '9') || ch == '_' || ch == '-' || ch == '.';
+      if (!ok) return;
     }
 
-    String out;
-    serializeJson(resp, out);
-    client->text(out);
+    pendingReq.kind     = 2;
+    pendingReq.clientId = client->id();
+    strlcpy(pendingReq.file, fileReq, sizeof(pendingReq.file));  // flen ≤ 60 < 64
     return;
   }
 
@@ -282,6 +260,172 @@ void onWsMessage(AsyncWebSocketClient* client, String msg) {
                   saved ? "saved" : "FAILED", probe, c.A, c.B, c.C);
     return;
   }
+}
+
+// ── Deferred cook-history reads (run from loop(), not the async callback) ──────
+//
+// These do blocking SD I/O and build large JSON payloads, so they must run on the
+// main loop, never inside the WebSocket event handler. wsProcessPending() below
+// dispatches to them from loop().
+
+// Build the cook history list (metadata for every cook file) and send it.
+static void sendCookList(AsyncWebSocketClient* client) {
+  JsonDocument resp;
+  resp["type"] = "cook_list";
+  JsonArray arr = resp["cooks"].to<JsonArray>();
+
+  File dir = SD.open(BBQ_COOKS);
+  if (dir) {
+    while (true) {
+      File entry = dir.openNextFile();
+      if (!entry) break;
+      if (entry.isDirectory()) { entry.close(); continue; }
+
+      String fname = String(entry.name());
+      entry.close();
+      if (!fname.startsWith("cook_") || !fname.endsWith(".csv")) continue;
+
+      String fullPath = String(BBQ_COOKS) + "/" + fname;
+      File f = SD.open(fullPath.c_str(), FILE_READ);
+      if (!f) continue;
+
+      JsonObject cook = arr.add<JsonObject>();
+      cook["file"] = fname;
+      uint32_t lastElapsed = 0;
+
+      while (f.available()) {
+        String line = f.readStringUntil('\n');
+        line.trim();
+        if      (line.startsWith("#name,"))          cook["name"]          = line.substring(6);
+        else if (line.startsWith("#preset,"))        cook["preset"]        = line.substring(8);
+        else if (line.startsWith("#meat_target_c,")) cook["meat_target_c"] = line.substring(15).toFloat();
+        else if (line.startsWith("#grill_low_c,"))   cook["grill_low_c"]   = line.substring(13).toFloat();
+        else if (line.startsWith("#grill_high_c,"))  cook["grill_high_c"]  = line.substring(14).toFloat();
+        else if (line.startsWith("#started_at,"))    cook["started_at"]    = line.substring(12);
+        else if (line.startsWith("#stopped_at,"))    cook["stopped_at"]    = line.substring(12);
+        else if (line.length() > 0 && !line.startsWith("#") && !line.startsWith("elapsed")) {
+          int comma = line.indexOf(',');
+          if (comma > 0) lastElapsed = line.substring(0, comma).toInt();
+        }
+      }
+      f.close();
+
+      if (!cook["stopped_at"].is<const char*>())
+        cook["duration_s"] = lastElapsed;
+    }
+    dir.close();
+  }
+
+  String out;
+  serializeJson(resp, out);
+  client->text(out);
+}
+
+// Build and send the full (downsampled) time-series for one cook file.
+// `file` has already been whitelist-validated by the caller.
+static void sendCookData(AsyncWebSocketClient* client, const char* file) {
+  String fullPath = String(BBQ_COOKS) + "/" + file;
+  File f = SD.open(fullPath.c_str(), FILE_READ);
+  if (!f) return;
+
+  // Pass 1: count data rows, read meat target (needed for target-hit calc)
+  uint32_t dataRows   = 0;
+  float    meatTargetC = 0;
+  while (f.available()) {
+    String line = f.readStringUntil('\n');
+    line.trim();
+    if (line.length() == 0) continue;
+    if (line.startsWith("#meat_target_c,")) meatTargetC = line.substring(15).toFloat();
+    if (line.startsWith("#") || line.startsWith("elapsed")) continue;
+    dataRows++;
+  }
+
+  const uint32_t MAX_POINTS = 240;
+  uint32_t stride = (dataRows + MAX_POINTS - 1) / MAX_POINTS;
+  if (stride < 1) stride = 1;
+
+  // Pass 2: parse rows, downsample, compute peaks + target-hit, capture notes
+  f.seek(0);
+  JsonDocument resp;
+  resp["type"] = "cook_data";
+  resp["file"] = file;
+  JsonArray points = resp["points"].to<JsonArray>();
+  JsonArray notes  = resp["notes"].to<JsonArray>();
+
+  float    peakMeat   = -1000;
+  float    peakGrill  = -1000;
+  int32_t  targetHitS = -1;
+  uint32_t rowIdx     = 0;
+
+  while (f.available()) {
+    String line = f.readStringUntil('\n');
+    line.trim();
+    if (line.length() == 0) continue;
+
+    if (line.startsWith("#note,")) {
+      // #note,<elapsed_s>,<text>,<meat_c>  — text may contain commas
+      int c1   = line.indexOf(',', 6);
+      int last = line.lastIndexOf(',');
+      if (c1 > 6 && last > c1) {
+        JsonObject n = notes.add<JsonObject>();
+        n["ts"]   = (uint32_t)line.substring(6, c1).toInt();
+        n["text"] = line.substring(c1 + 1, last);
+      }
+      continue;
+    }
+    if (line.startsWith("#") || line.startsWith("elapsed")) continue;
+
+    int c1 = line.indexOf(',');
+    int c2 = line.indexOf(',', c1 + 1);
+    if (c1 < 0 || c2 < 0) continue;
+
+    uint32_t t = (uint32_t)line.substring(0, c1).toInt();
+    String mStr = line.substring(c1 + 1, c2);
+    String gStr = line.substring(c2 + 1);
+    bool hasM = mStr.length() > 0;
+    bool hasG = gStr.length() > 0;
+    float m = hasM ? mStr.toFloat() : 0;
+    float g = hasG ? gStr.toFloat() : 0;
+
+    // Track peaks + first target-hit on every row (not just downsampled)
+    if (hasM && m > peakMeat)  peakMeat  = m;
+    if (hasG && g > peakGrill) peakGrill = g;
+    if (hasM && targetHitS < 0 && meatTargetC > 0 && m >= meatTargetC) {
+      targetHitS = (int32_t)t;
+    }
+
+    if (rowIdx % stride == 0) {
+      JsonObject p = points.add<JsonObject>();
+      p["t"] = t;
+      if (hasM) p["m"] = roundf(m * 10) / 10.0f;
+      if (hasG) p["g"] = roundf(g * 10) / 10.0f;
+    }
+    rowIdx++;
+  }
+  f.close();
+
+  if (peakMeat  > -999) resp["peak_meat_c"]  = roundf(peakMeat  * 10) / 10.0f;
+  if (peakGrill > -999) resp["peak_grill_c"] = roundf(peakGrill * 10) / 10.0f;
+  if (targetHitS >= 0)  resp["target_hit_s"] = targetHitS;
+
+  String out;
+  serializeJson(resp, out);
+  client->text(out);
+  Serial.printf("Cook data sent: %s (%u rows → %u points)\n",
+                file, dataRows, (unsigned)points.size());
+}
+
+// Called from loop(): services at most one deferred request per call.
+void wsProcessPending() {
+  if (pendingReq.kind == 0) return;
+  PendingWsRequest req = pendingReq;
+  pendingReq.kind = 0;                       // clear before the (slow) work
+
+  AsyncWebSocketClient* client = ws.client(req.clientId);
+  if (!client || client->status() != WS_CONNECTED) return;  // client gone
+
+  if      (req.kind == 1) sendCookList(client);
+  else if (req.kind == 2) sendCookData(client, req.file);
 }
 
 // ── Config payload ────────────────────────────────────────────────────────────
@@ -392,6 +536,7 @@ void wsBroadcast(float meatC, float grillC, String timestamp) {
   }
 
   if (isAPMode()) doc["ap_mode"] = true;
+  else doc["rssi"] = WiFi.RSSI();
 
   String out;
   serializeJson(doc, out);

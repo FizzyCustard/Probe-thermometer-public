@@ -236,6 +236,7 @@ function updateUI(meatC, grillC) {
       document.getElementById('meat-pill').textContent = 'TARGET REACHED';
       document.getElementById('meat-pill').className = 'status-pill reached';
       showBanner('Target temperature reached — time to check the meat!');
+      showMeatTargetNotification(settings.meatTarget, unit);
     }
   } else {
     document.getElementById('meat-temp').textContent = '--';
@@ -290,6 +291,38 @@ function showBanner(msg) {
 
 function closeBanner() {
   document.getElementById('banner').classList.add('hidden');
+}
+
+// ── Notifications ────────────────────────────────────────────────────────────
+
+async function requestNotificationPermission() {
+  if (!('Notification' in window)) return;            // API not supported
+  if (Notification.permission === 'granted') return;  // already granted
+  if (Notification.permission === 'denied') return;   // user blocked — respect it
+  try {
+    await Notification.requestPermission();
+  } catch (e) {
+    // Absorbs legacy callback-based browsers (Safari < 15) or any throw
+  }
+}
+
+function showMeatTargetNotification(meatTargetC, currentUnit) {
+  if (!('Notification' in window)) return;
+  if (Notification.permission !== 'granted') return;
+
+  const displayTemp = currentUnit === 'F'
+    ? Math.round(cToF(meatTargetC))
+    : meatTargetC;
+  const unitStr = currentUnit === 'F' ? '°F' : '°C';
+
+  const n = new Notification('BBQ Monitor — Target Reached!', {
+    body: `Meat hit ${displayTemp}${unitStr} — time to check!`,
+    icon: '/favicon.ico',        // silently ignored if absent on the device
+    tag:  'bbq-meat-target',     // collapses any duplicate notifications
+    requireInteraction: false,   // auto-dismiss; user doesn't need to clear it
+  });
+
+  n.onclick = () => { window.focus(); n.close(); };
 }
 
 // ── Unit toggle ─────────────────────────────────────────────────────────────
@@ -413,12 +446,31 @@ function setConnState(state) {
     offlineSince = 0;
     if (bannerShown) { closeBanner(); bannerShown = false; }
   }
+
+  if (state !== 'live') updateSignalStrength(null);
 }
 
 function setPillReconnecting() {
   const pill = document.getElementById('connection-pill');
   if (!pill) return;
   pill.textContent = 'RECONNECTING…';
+}
+
+function updateSignalStrength(rssi) {
+  const el = document.getElementById('signal-icon');
+  if (!el) return;
+  if (rssi == null) {
+    el.classList.remove('visible', 's1', 's2', 's3', 's4');
+    el.title = '';
+    return;
+  }
+  const tier = rssi >= -55 ? 's4'
+             : rssi >= -65 ? 's3'
+             : rssi >= -75 ? 's2'
+             :               's1';
+  el.classList.remove('s1', 's2', 's3', 's4');
+  el.classList.add('visible', tier);
+  el.title = `WiFi: ${rssi} dBm`;
 }
 
 function scheduleReconnect() {
@@ -471,6 +523,7 @@ function connectWS() {
     if (data.type === 'cal_saved')     { handleCalSaved(data);     return; }
     if (data.type === 'config')        { handleConfig(data);        return; }
     if (data.type === 'cook_list')     { handleCookList(data);      return; }
+    if (data.type === 'cook_data')     { handleCookData(data);      return; }
     if (data.type === 'wifi_networks') { handleWifiNetworks(data);  return; }
     if (data.type === 'wifi_saved')    { handleWifiSaved(data);     return; }
     if (data.type === 'cook_started' || data.type === 'cook_stopped') return;
@@ -502,6 +555,7 @@ function connectWS() {
       appendChartPoint(meatC, grillC);
     }
 
+    if (data.rssi != null) updateSignalStrength(data.rssi);
     updateUI(meatC, grillC);
   });
 
@@ -589,6 +643,24 @@ function handleConfig(data) {
 
   if (data.ap_mode) setAPModeBanner(true);
   updateWifiStatusLine();
+}
+
+function handleCookData(data) {
+  if (!window.__cookState || !data.file) return;
+  const cook = window.__cookState.history.find(c => c.id === data.file);
+  if (!cook) return;
+
+  cook.points    = Array.isArray(data.points) ? data.points : [];
+  cook.peakMeat  = data.peak_meat_c  != null ? data.peak_meat_c  : cook.peakMeat;
+  cook.peakGrill = data.peak_grill_c != null ? data.peak_grill_c : cook.peakGrill;
+  cook.targetHitMin = data.target_hit_s != null ? Math.round(data.target_hit_s / 60) : cook.targetHitMin;
+  cook.notes     = Array.isArray(data.notes) ? data.notes : [];
+
+  if (window.__cookState.selectedHistoryId === data.file) {
+    if (typeof renderReplayChart      === 'function') renderReplayChart(cook, cook.points);
+    if (typeof renderHistoryDetailStats === 'function') renderHistoryDetailStats(cook);
+    if (typeof renderHistoryDetailNotes === 'function') renderHistoryDetailNotes(cook);
+  }
 }
 
 function handleCookList(data) {
