@@ -1,0 +1,426 @@
+# BBQ Thermometer — Independent Firmware Review
+
+**Date:** 2026-07-05
+**Scope:** `arduino/bbq-thermometer/` firmware, plus device-side deployment concerns
+(what the ESP8266 actually serves from LittleFS). The Netlify demo (`data/`) is out
+of scope per request.
+
+This review was done independently of `arduino/CODE_REVIEW.md` and
+`arduino/IMPROVEMENTS.md`. A cross-reference section at the end notes where findings
+overlap with those documents; everything else here is new.
+
+---
+
+## Summary
+
+The firmware is genuinely well put together for a hobby ESP8266 project: the deferred
+work queue for SD reads, the ADC-failure gating, the whitelisted cook filenames, and
+the config/persistence layering all show care. But there are four issues I'd call
+**ship-blockers** — two security holes, one "app is dead without internet" deployment
+bug, and a settings-clobbering bug that silently undoes the SD persistence work.
+Below those, there's a cluster of blocking-work-in-async-callback issues and a set of
+ESP8266-specific performance/memory wins.
+
+| # | Severity | Finding |
+|---|----------|---------|
+| 1 | Critical | WiFi credentials downloadable at `http://<ip>/wifi.json` |
+| 2 | Critical | Chart.js loaded from CDN — entire UI dead in AP mode / without internet |
+| 3 | Critical | Any connecting browser overwrites the device's persisted targets |
+| 4 | High | Unbounded WebSocket send queue can exhaust heap and crash the device |
+| 5 | High | Blocking `WiFi.scanNetworks()` inside the async WS callback |
+| 6 | High | `delay(1000)` + `ESP.restart()` inside the async WS callback |
+| 7 | High | ADS1115 read on *every* loop iteration (~99% of reads discarded) |
+| 8 | High | Active cook is lost on reboot; file left permanently "in progress" |
+| 9 | High | CSV corruption via commas/newlines in user-supplied names and notes |
+| 10 | Medium | Cook filenames trust the browser clock (collisions, unsanitised chars) |
+| 11 | Medium | Calibration coefficients computed in the browser, trusted blindly |
+| 12 | Medium | AP mode is a dead end — never retries the home network; AP is open |
+| 13 | Medium | `wifi_config` restarts without testing the new credentials |
+| 14 | Medium | `WiFi.persistent()` not disabled — flash wear on every boot |
+| 15 | Medium | `data[len] = '\0'` writes one byte past the frame buffer |
+| 16 | Medium | No SD/heap/status telemetry — SD failures are invisible to the user |
+| 17 | Medium | Settings message applies unvalidated values (missing field → 0 °C) |
+| 18 | Low | Open/short-circuit comments swapped in `readResistance()` |
+| 19 | Low | `PROBE1_*` means "meat" in one macro family and "grill" in another |
+| 20 | Low | Mixed error sentinels (`-999.0f` vs `NAN`) |
+| 21 | Low | Misc: `cleanupClients()` cadence, `pendingReq` atomicity, header coupling, `-Wno-format-truncation` |
+
+Plus dedicated sections on **performance/memory** and **firmware-side UX wins**.
+
+---
+
+## Critical
+
+### 1. WiFi credentials are served over HTTP
+
+`bbq-thermometer.ino:135` mounts the *entire* LittleFS root as the web root:
+
+    server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
+
+but `wifi_manager.h:8` stores credentials in that same root:
+
+    #define WIFI_CREDS_PATH "/wifi.json"
+
+Once the user has configured WiFi, anyone on the network — or anyone who connects to
+the open `BBQ-Thermometer` AP — can fetch `http://<device-ip>/wifi.json` and read the
+home WiFi SSID and password in plaintext. The captive portal makes this worse: in AP
+mode every DNS name resolves to the device, so any background HTTP request from a
+joined phone lands on this server.
+
+**Fix options (pick one):**
+- Serve the UI from a subdirectory: upload web assets under `/www/` and change to
+  `serveStatic("/", LittleFS, "/www/")`. Cleanest; also future-proofs against any
+  other runtime files landing in the FS root.
+- Or register an explicit 404 for the file before `serveStatic`:
+  `server.on("/wifi.json", [](AsyncWebServerRequest* r){ r->send(404); });`
+- Or move credentials out of LittleFS entirely (EEPROM/RTC user memory).
+
+### 2. Chart.js comes from a CDN — the device UI cannot boot offline
+
+`device/data/index.html:401`:
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/..."></script>
+
+This is the file uploaded to LittleFS and served by the ESP. Two failure modes:
+
+- **AP mode (first-time setup):** the phone is connected to the BBQ AP, which has no
+  internet. The CDN fetch fails, `Chart` is undefined, and `initChart()` at
+  `app.js:73` throws — which aborts the `DOMContentLoaded` handler **before
+  `connectWS()` is ever called** (`app.js:755-768`). The app isn't "missing a
+  chart"; it is completely dead: no WebSocket, no WiFi scan, no way to complete
+  setup. First-time setup only works if the phone happens to fall back to mobile
+  data while on the AP.
+- **Normal use:** home internet outage (common enough during a 10-hour cook) means
+  a page refresh bricks the dashboard even though the device and LAN are fine.
+
+The SPEC explicitly says "Chart.js served from SPIFFS, no CDN dependency" — the
+implementation drifted from it.
+
+**Fix:** ship `chart.umd.min.js` in `device/data/` (or better, `chart.umd.min.js.gz`
+— ~70 KB gzipped; ESPAsyncWebServer serves `.gz` automatically). Also wrap chart
+init in a guard (`if (typeof Chart !== 'undefined')`) so a missing/corrupt asset can
+never take the WebSocket layer down with it.
+
+### 3. Every fresh browser connection overwrites the device's saved targets
+
+Firmware side: the `settings` handler (`websocket_handler.h:40-48`) applies and
+persists whatever arrives, no questions asked. Client side: on every WebSocket open,
+`app.js:513` calls `sendSettings()` *before* requesting config. Net effect:
+
+1. Device boots, loads meat target 95 °C from SD.
+2. Someone opens the dashboard on a fresh phone (defaults 74/160/200).
+3. Browser pushes 74/160/200 → firmware overwrites RAM **and** SD.
+4. The `config` reply then tells the browser "74" — the user never sees 95 again.
+
+The SD settings persistence effectively cannot survive any client connection, and
+each reconnect also costs a needless SD write (`saveSettings` on every WS open).
+
+**Fix:** the device must be the source of truth. Remove the `sendSettings()` on
+open in the client, and in firmware skip `saveSettings` when values are unchanged.
+A `seq`/timestamp echo on settings would make this robust against races with
+multiple viewers.
+
+---
+
+## High
+
+### 4. A slow or stalled client can crash the device
+
+`wsBroadcast()` (`websocket_handler.h:543`) calls `ws.textAll()` once per second
+with no back-pressure check. In ESPAsyncWebServer, each queued message is heap-
+allocated per client; a client that stops ACKing (phone locked, walked out of WiFi
+range — *the* normal BBQ scenario) accumulates queued frames until the heap is gone
+and the ESP8266 resets mid-cook. This is the classic ESPAsyncWebServer failure mode.
+
+**Fix:** before broadcasting, skip clients whose queue is full:
+iterate clients and use `client->canSend()` / check `queueIsFull()`, or gate the
+whole broadcast on `ws.availableForWriteAll()`. Also pass a cap to
+`ws.cleanupClients(N)` to bound simultaneous clients.
+
+### 5. Synchronous WiFi scan inside the async callback
+
+`websocket_handler.h:195-210`: `WiFi.scanNetworks()` blocks for roughly 2–4 seconds.
+Running it inside the WebSocket event handler stalls the TCP stack and risks the
+soft watchdog — the exact problem the deferred `pendingReq` queue was built to avoid
+for SD reads. Inconsistent with the project's own (good) pattern.
+
+**Fix:** either route it through the same deferred queue (add `kind: 3`), or use
+`WiFi.scanNetworksAsync()` and push the result when the callback fires. Note the
+scan also momentarily degrades the AP connection the user is configuring over, so
+sending an immediate "scanning…" ack is a nice touch.
+
+### 6. `delay(1000)` + `ESP.restart()` inside the async callback
+
+`websocket_handler.h:224-227`. Blocking `delay()` in an async handler is explicitly
+forbidden by the library (it runs in the LwIP context), and there's no guarantee the
+`wifi_saved` response has actually been flushed to the client before the restart.
+
+**Fix:** set a `restartAtMillis = millis() + 1500` flag and perform the restart from
+`loop()`. That both honours the async contract and gives the TCP stack time to
+deliver the response the UI is waiting on.
+
+### 7. The ADS1115 is read on every single loop pass
+
+`bbq-thermometer.ino:161-164` reads both channels unconditionally each iteration.
+`readADC_SingleEnded()` blocks ~8 ms per channel at the default 128 SPS, so:
+
+- every loop pass costs ~16 ms of busy-wait — the loop runs at ~60 Hz doing nothing
+  useful with 59 of those 60 readings;
+- it delays `wsProcessPending()`, `dnsServer` ticks, and broadcast timing;
+- it keeps the I2C bus and ADC continuously busy for no benefit (readings are only
+  consumed at 1 s / 5 s / 30 s cadence);
+- it wastes battery.
+
+**Fix:** move the two reads inside the `BROADCAST_INTERVAL_MS` block and cache
+`tMeat`/`tGrill` for the logger and cook sampler (they already run at ≥1 s cadence,
+so a 1 s-old reading is exact for them). This is the single biggest performance fix
+in the codebase. While there, take a median-of-3 or short EMA — a single raw sample
+per second makes the displayed value and the range alerts twitchy near thresholds.
+
+### 8. A reboot mid-cook loses the active cook
+
+`activeCook` lives only in RAM (`cook_session.h:21`). A brown-out or battery swap
+during a 10-hour brisket:
+
+- ends sampling permanently (the UI will say no cook is active);
+- leaves the cook file with no `#stopped_at`, so `sendCookList` must scan every data
+  row of it forever after to infer a duration;
+- loses `startMillis`, so even a manual restart can't produce correct `elapsed_s`.
+
+**Fix:** on boot, scan `/BBQ/cooks/` for a file without `#stopped_at` (or keep a tiny
+`/BBQ/config/active_cook.txt` marker written on start and removed on stop). Offer
+resume: elapsed can be reconstructed from the last logged `elapsed_s` row. At
+minimum, auto-close the orphan with a `#stopped_at,unknown` footer.
+
+### 9. User text can corrupt the CSV store
+
+- **Favourites:** `loadFavourites` (`logger.h:195-209`) splits on commas and the
+  comment admits "names don't contain commas" — but names are free text from the
+  browser ("Brisket, low & slow" is a very plausible cook name, and stop-and-save
+  copies the cook name into a favourite). One comma shifts every following field.
+- **Notes and names with newlines:** `cookAppendNote` (`cook_session.h:87-98`) and
+  the `#name,` header write raw text. The note composer is a `<textarea>` —
+  Shift+Enter produces newlines that split a note into a garbage CSV row.
+- A note beginning with `#` or `elapsed` would also be mis-parsed on read-back.
+
+**Fix (firmware-side, cheap):** sanitise on write — replace `\r`/`\n` with spaces
+everywhere; for favourites/presets either quote fields or substitute commas
+(e.g. with `;`). Since firmware is also the only reader, substitution is simplest.
+
+### 10. Cook filenames trust the browser
+
+`cook_start` uses the client-supplied `ts` for both the filename and `#started_at`
+(`websocket_handler.h:59-62`, `cook_session.h:39-43`):
+
+- Only `:` is replaced; any other character the client sends (including `/`) goes
+  straight into an SD path. It isn't run through the whitelist that
+  `request_cook_data` rightly enforces.
+- No `ts` → literal `cook_unknown.csv`; a second such cook **appends a second header
+  block into the same file**, corrupting history for both.
+- A phone with a wrong clock silently misdates the cook even though the device has
+  NTP.
+
+**Fix:** in STA mode, generate the timestamp on-device (`getTimestamp()` — it's
+right there); accept the browser value only as an AP-mode fallback, and whitelist it
+with the same character rules as `request_cook_data`. Add a collision suffix
+(`_1`, `_2`) if the file already exists.
+
+### 11. Calibration is computed in the browser and trusted blindly
+
+`cal_save` (`websocket_handler.h:232-247`) applies A/B/C exactly as the client
+computed them. The firmware *already has* `calcSHCoeffs()` (`thermistor.h:89`) and
+*already receives the three raw points* in the same message — the browser-side
+duplicate (`app.js:780-791`) is both redundant and the trusted path. Two identical
+resistances produce a division by zero → NaN coefficients get applied and saved,
+and every subsequent reading is NaN until recalibration. `loadCalibration()`
+(`logger.h:253`) has the same gap: no `isfinite()` check on what it loads.
+
+**Fix:** compute coefficients on-device from the submitted points via the existing
+`calcSHCoeffs()` (delete the JS copy), reject non-finite results, and validate with
+a round-trip sanity check (e.g. the 25 °C point should convert back to 25 ± 2 °C).
+Validate on load from SD too.
+
+---
+
+## Medium
+
+### 12. AP mode is a dead end, and the AP is open
+
+Once `startAP()` runs, the device stays in AP mode until a manual reconfigure —
+if the router was simply rebooting during device boot, the device never rejoins
+(`wifi_manager.h:66-74`). And the softAP has no password while exposing WiFi
+config, credential storage (see #1), and restart control to anyone in radio range.
+
+**Fix:** in AP mode, retry the saved STA credentials every ~60 s in the background
+(`WIFI_AP_STA` or timed re-attempt). Give the AP a WPA2 password (printed on the
+enclosure / in the docs) — `WiFi.softAP(AP_SSID, AP_PASS)`.
+
+### 13. `wifi_config` saves and restarts without testing the credentials
+
+A typo'd password means: save → restart → 15 s STA timeout → fall back to compiled
+creds or AP — and the user gets no feedback about *why* it didn't join their
+network. Better: attempt the connection first (async, from `loop()`), report
+success/failure over the still-open AP WebSocket, and only persist + restart on
+success. This is also the standard captive-portal UX users expect.
+
+### 14. `WiFi.persistent(false)` is never called
+
+Every `WiFi.begin(ssid, pass)` writes credentials to the SDK flash sector unless
+persistence is disabled. The project keeps its own credential store, so this is
+pure duplicate flash wear (plus an extra plaintext copy of the password in flash).
+Call `WiFi.persistent(false)` before the first `WiFi.begin/softAP`.
+
+### 15. Off-by-one write in the WS frame handler
+
+`websocket_handler.h:500`: `data[len] = '\0'` writes one byte past the payload.
+Common in ESPAsyncWebServer examples and *usually* survivable, but it's still a
+write past the reported buffer length. `String((char*)data, len)` (or ArduinoJson's
+`deserializeJson(doc, data, len)` — which avoids the String copy entirely) removes
+the risk for free.
+
+### 16. SD problems are invisible
+
+If `SD.begin()` fails, or the card fills/fails mid-cook, every write silently
+no-ops: `logReading`, `cookAppendReading`, `saveSettings` all `return` on a failed
+open. The cook proceeds; the user finds out hours later that nothing was recorded.
+There's also no `sdReady` gate, so with no card present the loop still attempts SPI
+transactions every 5 s.
+
+**Fix:** track an `sdOk` flag (set at mount, cleared on any failed open/write, with
+periodic remount attempts) and include it in the 1 Hz broadcast — e.g.
+`"sd": true, "heap": 23840`. The UI can then show a "not recording!" warning, and
+the heap figure is invaluable for field-debugging #4.
+
+### 17. Settings message lacks validation
+
+`websocket_handler.h:41-43`: a malformed or partial `settings` message yields
+`as<float>()` = 0, which is immediately persisted — meat target 0 °C means the
+"target reached" alert fires instantly and permanently. Validate presence
+(`doc["meat_target"].is<float>()`), clamp to sane ranges (0–150 meat / 0–400 grill),
+and require `grill_low < grill_high`.
+
+---
+
+## Low / polish
+
+### 18. Swapped comments in `readResistance()`
+`thermistor.h:35-37`: with this divider topology, `raw <= 0` is a **shorted** probe
+(node pulled to GND) and `voltage >= SUPPLY_VOLTAGE` is an **open circuit / no
+probe** (node pulled up through the series resistor). The comments say the
+opposite. Behaviour is right; the labels will mislead the next debugging session.
+
+### 19. Probe naming is internally inconsistent
+`config.example.h`: `PROBE0_ENABLED` = meat, `PROBE1_ENABLED` = grill — but
+`PROBE1_SH_*` = meat and `PROBE2_SH_*` = grill. Same physical probe is "0", "1",
+and "1" depending on macro family. Rename the S-H macros to `PROBE0_SH_*` /
+`PROBE1_SH_*` (or `MEAT_SH_*` / `GRILL_SH_*`) before it causes a real mix-up.
+
+### 20. Two error sentinel conventions
+`resistanceToCelsius` returns `-999.0f` for bad input; `readCelsius` returns `NAN`;
+callers check `> 500 && < 2000000` resistance instead. Standardise on `NAN`
+(ArduinoJson already serialises it as `null`, which the UI handles).
+
+### 21. Miscellany
+- `ws.cleanupClients()` every loop pass (`.ino:153`) — the library recommends ~1 Hz;
+  fold it into the broadcast block.
+- `pendingReq` (`websocket_handler.h:29`) is written from the async context and read
+  from `loop()` — make `kind` `volatile` and write it last when enqueuing, so a
+  half-written request can never be serviced.
+- `MAX_PRESETS`/`MAX_FAVS` are `#define`d in the `.ino` *before* the includes that
+  need them — the headers aren't self-contained and silently depend on include
+  order. Move them to `config.h` (or the headers that own the types).
+- `build_flags = -Wno-format-truncation` suppresses a warning that exists to catch
+  real path-buffer truncation (e.g. `activeCook.filename[56]`). The current sizes
+  fit; prefer sizing buffers so the warning can stay on.
+- `fav_save` when the list is full (32) silently drops the favourite but still
+  replies with a config — the UI shows success. Send an error flag.
+- NTP: `NTP_UTC_OFFSET_SEC` bakes in a fixed offset with no DST handling, and the
+  offset epoch is then formatted with `gmtime` — timestamps shift by an hour when
+  DST changes mid-season. Fine for v1; document it, or log in UTC and let the
+  browser localise.
+
+---
+
+## Performance & memory (ESP8266-specific)
+
+The D1 Mini gives you roughly 40 KB of usable heap with WiFi up, and heap
+*fragmentation* — not just exhaustion — is what actually kills long-running ESP8266
+projects. A 10-hour cook is a long soak test. Ranked by impact:
+
+1. **Gate the ADC reads** (#7 above) — biggest CPU/power win, one-line restructure.
+2. **Back-pressure on broadcasts** (#4 above) — biggest crash-prevention win.
+3. **Bound the big JSON payloads.** `sendCookData` builds a ~240-point
+   `JsonDocument`, serialises it into a `String` (second copy), and the WS layer
+   queues a third. Peak transient cost can approach 20–30 KB — right at the edge.
+   Consider `MAX_POINTS` of 120–150 (plenty at phone-chart resolution) and
+   `measureJson` + a single pre-reserved buffer. Same logic caps `sendCookList` as
+   the number of cooks grows.
+4. **`sendCookList` re-reads every row of every unstopped cook file** on every
+   History-tab visit, just to recover `lastElapsed`. Cost grows linearly with
+   history size and stalls `loop()` (broadcasts, cook sampling) while it runs — with
+   `yield()` nowhere in the per-file loops, a big history risks the soft WDT.
+   Cheap fixes: `yield()` per file; stop scanning data rows once the header block is
+   parsed for *stopped* cooks (their duration comes from timestamps); longer term,
+   maintain a tiny `/BBQ/cooks/index.csv` appended on cook stop.
+5. **String churn in hot paths.** `getTimestamp()`/`getDateStr()` allocate Strings
+   every second; `readStringUntil('\n')` allocates per CSV row; path building
+   concatenates Strings. Fixed `char` buffers + `snprintf` throughout the 1 Hz and
+   file-scan paths removes steady-state fragmentation pressure. (Overlaps
+   IMPROVEMENTS.md §1 — endorsed, it's the right list.)
+6. **Move literals to flash.** On ESP8266, plain string literals live in RAM.
+   Wrapping the ~40 Serial format strings in `F()`/`PSTR()` reclaims ~1 KB+ of RAM
+   for zero cost.
+7. **Gzip the web assets.** `style.css` (~1800 lines) + `app.js` + `roadmap.js` +
+   (once bundled per #2) Chart.js served raw from LittleFS is ~350 KB per cold page
+   load, streamed through a 4 KB-heap-per-connection async server. Pre-gzipping
+   (`*.gz` alongside, which `serveStatic` picks up automatically) cuts transfer
+   ~4–5× and page load on phones from seconds to near-instant, and reduces the time
+   the server spends holding buffers.
+8. **Serial prints at 1 Hz** (`.ino:169-170`): two formatted lines per second
+   forever. Trivial CPU, but gate them behind a `DEBUG_READINGS` flag — at 115200
+   baud they're also the first thing to blur timing when debugging something else.
+
+Not worth doing: CPU frequency changes, WiFi TX-power tuning, light sleep — the
+async web server + always-on dashboard rules out real sleep, and the battery budget
+in SPEC.md (40–50 h on 10 Ah) already clears a weekend cook with margin.
+
+---
+
+## Firmware-enabled UX wins (cheap, high value)
+
+- **mDNS**: `MDNS.begin("bbq")` + announce HTTP → the dashboard is at
+  `http://bbq.local` instead of a hunt through the router's DHCP table. ~4 lines
+  including the `MDNS.update()` tick. Single best usability improvement per line of
+  code available in this codebase.
+- **Status in the broadcast**: `sd`, `heap`, `uptime_s` (see #16) — lets the UI
+  surface "SD not recording" and gives you remote diagnostics for free.
+- **Reading smoothing** (see #7): median-of-3 kills display flicker and stops the
+  grill IN RANGE/TOO LOW pill from flapping when hovering at the threshold.
+  Alternatively (or additionally) add ~1 °C hysteresis to the range evaluation.
+- **Cook resume after reboot** (see #8): turns a battery blip from "lost my brisket
+  log" into a non-event. This is the feature a real user will thank you for.
+- **Probe-disconnect debounce**: one bad ADC sample currently blanks the reading
+  for a full second and (client-side) drops a chart point. Require 2–3 consecutive
+  out-of-range samples before declaring a probe disconnected.
+- **OTA updates** (`ArduinoOTA`, ~10 lines): the enclosure never has to come off to
+  fix any of the above. Gate it behind a password. Roadmap says v2, but it pays for
+  itself during v1 debugging.
+
+---
+
+## Cross-reference with the existing review docs
+
+Confirmed still-open and independently re-found (not re-argued above):
+WiFi reconnection during a cook (CODE_REVIEW #2), SD write error handling & remount
+(IMPROVEMENTS 2.3/2.4), String→static-buffer memory work (IMPROVEMENTS §1),
+unpinned git dependencies in `platformio.ini` (CODE_REVIEW #7 — note the two
+`me-no-dev` repos are effectively unmaintained; the `esphome`/`ESP32Async` forks are
+the maintained lineage), cook-list response growth (CODE_REVIEW #8, extended here in
+Performance #4).
+
+New in this review and, as far as I can tell, tracked nowhere else — prioritise
+these: **#1 (wifi.json exposure), #2 (CDN Chart.js), #3 (settings clobber),
+#4 (WS queue crash), #7 (ADC every loop), #8 (cook resume), #9 (CSV injection),
+#10 (browser timestamps), #11 (trusted calibration).**
+
+Suggested order of attack: 1 → 2 → 3 → 4 → 7 → 6/5 → 9/10/11 → 16 → the rest.
