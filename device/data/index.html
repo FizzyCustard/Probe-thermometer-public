@@ -398,7 +398,9 @@
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <!-- Bundled locally (also shipped gzipped for the ESP) — the device must
+       work with no internet: in AP setup mode a CDN script can never load. -->
+  <script src="chart.umd.min.js"></script>
   <script src="app.js"></script>
   <script src="roadmap.js"></script>
   <script>

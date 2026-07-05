@@ -10,7 +10,18 @@
 #define WIFI_SSID       "YOUR_SSID"
 #define WIFI_PASSWORD   "YOUR_PASSWORD"
 
+// WPA2 password for the device's own setup access point (min 8 chars).
+#define AP_PASSWORD     "bbq-setup"
+
+// ── OTA / mDNS ───────────────────────────────────────────────────────────────
+
+#define MDNS_HOSTNAME   "bbq"          // dashboard reachable at http://bbq.local
+#define OTA_PASSWORD    "bbq-update"   // change this before flashing
+
 // ── NTP ──────────────────────────────────────────────────────────────────────
+//
+// Note: this is a fixed offset — DST changes are NOT tracked, so timestamps
+// shift by an hour across a DST boundary. Set 0 to log in UTC.
 
 #define NTP_SERVER          "pool.ntp.org"
 #define NTP_UTC_OFFSET_SEC  0       // e.g. 3600 = GMT+1, 0 = UTC
@@ -48,18 +59,24 @@
 // Run the on-device calibration tool and save to SD card for better accuracy.
 // The firmware loads saved coefficients from SD on boot and uses these only
 // as a fallback.
+//
+// Probe indices match the enable flags above: probe 0 = meat, probe 1 = grill.
 
-// Probe 1 — Meat
+// Probe 0 — Meat
+#define PROBE0_SH_A   4.475e-4f
+#define PROBE0_SH_B   2.523e-4f
+#define PROBE0_SH_C   1.701e-9f
+
+// Probe 1 — Grill
 #define PROBE1_SH_A   4.475e-4f
 #define PROBE1_SH_B   2.523e-4f
 #define PROBE1_SH_C   1.701e-9f
-
-// Probe 2 — Grill
-#define PROBE2_SH_A   4.475e-4f
-#define PROBE2_SH_B   2.523e-4f
-#define PROBE2_SH_C   1.701e-9f
 
 // ── Timing ────────────────────────────────────────────────────────────────────
 
 #define BROADCAST_INTERVAL_MS   1000   // WebSocket push to browser (ms)
 #define LOG_INTERVAL_MS         5000   // SD card CSV write interval (ms)
+
+// ── Debug ─────────────────────────────────────────────────────────────────────
+
+#define DEBUG_READINGS  0   // 1 = print probe readings to Serial every second

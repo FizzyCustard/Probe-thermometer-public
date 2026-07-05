@@ -6,6 +6,15 @@
 #include "config.h"
 #include "thermistor.h"
 
+// ── Storage limits ────────────────────────────────────────────────────────────
+
+#ifndef MAX_PRESETS
+#define MAX_PRESETS   16
+#endif
+#ifndef MAX_FAVS
+#define MAX_FAVS      32
+#endif
+
 // ── SD paths ──────────────────────────────────────────────────────────────────
 
 #define BBQ_ROOT    "/BBQ"
@@ -17,22 +26,66 @@
 #define PRESETS_FILE  "/BBQ/config/presets.csv"
 #define FAVS_FILE     "/BBQ/config/favourites.csv"
 
+#define SD_REMOUNT_INTERVAL_MS  30000UL
+
+// True while the SD card is mounted and writable. Cleared on any failed
+// open/write; loggerTick() periodically attempts a remount. Broadcast to the
+// UI so the user knows when nothing is being recorded.
+bool sdOk = false;
+
+// ── CSV field sanitiser ───────────────────────────────────────────────────────
+//
+// User-supplied text (cook names, presets, notes) is stored in comma-separated
+// files that we parse back with plain delimiter splits. Strip the characters
+// that would corrupt the format: newlines break rows, commas shift fields.
+
+void csvSanitize(char* s) {
+  for (; *s; s++) {
+    if (*s == '\n' || *s == '\r') *s = ' ';
+    else if (*s == ',')           *s = ';';
+  }
+}
+
 // ── SD mount + folder tree ────────────────────────────────────────────────────
 
-bool loggerBegin() {
-  if (!SD.begin(SD_CS_PIN)) {
-    Serial.println("SD mount failed");
-    return false;
-  }
-  Serial.println("SD card mounted");
-
-  // Create the /BBQ/ folder hierarchy if it doesn't exist
+static void sdMakeTree() {
   SD.mkdir(BBQ_ROOT);
   SD.mkdir(BBQ_LOGS);
   SD.mkdir(BBQ_COOKS);
   SD.mkdir(BBQ_CONFIG);
+}
 
+bool loggerBegin() {
+  if (!SD.begin(SD_CS_PIN)) {
+    Serial.println(F("SD mount failed"));
+    sdOk = false;
+    return false;
+  }
+  Serial.println(F("SD card mounted"));
+  sdMakeTree();
+  sdOk = true;
   return true;
+}
+
+// Call once per loop(): retries the mount every 30 s after a failure so a
+// reseated card starts recording again without a reboot.
+void loggerTick() {
+  static uint32_t lastAttempt = 0;
+  if (sdOk) return;
+  if (millis() - lastAttempt < SD_REMOUNT_INTERVAL_MS) return;
+  lastAttempt = millis();
+  if (SD.begin(SD_CS_PIN)) {
+    sdMakeTree();
+    sdOk = true;
+    Serial.println(F("SD card remounted"));
+  }
+}
+
+// Open a file for writing, tracking SD health on failure.
+static File sdOpenWrite(const char* path) {
+  File f = SD.open(path, FILE_WRITE);
+  if (!f) sdOk = false;
+  return f;
 }
 
 // ── Temperature CSV logging ───────────────────────────────────────────────────
@@ -42,11 +95,12 @@ String getTodayFilename(String dateStr) {
 }
 
 void logReading(String filename, String timestamp, float probe1C, float probe2C) {
+  if (!sdOk) return;
   if (isnan(probe1C) && isnan(probe2C)) return;  // nothing to log
   bool newFile = !SD.exists(filename.c_str());
-  File f = SD.open(filename.c_str(), FILE_WRITE);
+  File f = sdOpenWrite(filename.c_str());
   if (!f) return;
-  if (newFile) f.println("timestamp,meat_c,grill_c");
+  if (newFile) f.println(F("timestamp,meat_c,grill_c"));
   char b1[12], b2[12];
   f.printf("%s,%s,%s\n",
            timestamp.c_str(),
@@ -58,10 +112,11 @@ void logReading(String filename, String timestamp, float probe1C, float probe2C)
 // ── Settings persistence ──────────────────────────────────────────────────────
 
 void saveSettings(float meatTarget, float grillLow, float grillHigh) {
+  if (!sdOk) return;
   SD.remove(SETTINGS_FILE);
-  File f = SD.open(SETTINGS_FILE, FILE_WRITE);
+  File f = sdOpenWrite(SETTINGS_FILE);
   if (!f) return;
-  f.println("meat_target_c,grill_low_c,grill_high_c");
+  f.println(F("meat_target_c,grill_low_c,grill_high_c"));
   f.printf("%.1f,%.1f,%.1f\n", meatTarget, grillLow, grillHigh);
   f.close();
   Serial.printf("Settings saved: meat=%.1f grill=%.1f–%.1f\n",
@@ -100,10 +155,11 @@ struct Preset {
 };
 
 void savePresets(Preset* list, uint8_t count) {
+  if (!sdOk) return;
   SD.remove(PRESETS_FILE);
-  File f = SD.open(PRESETS_FILE, FILE_WRITE);
+  File f = sdOpenWrite(PRESETS_FILE);
   if (!f) return;
-  f.println("name,meat_target_c");
+  f.println(F("name,meat_target_c"));
   for (uint8_t i = 0; i < count; i++) {
     f.printf("%s,%.0f\n", list[i].name, list[i].tempC);
   }
@@ -151,7 +207,7 @@ void seedDefaultPresets(Preset* list, uint8_t& count) {
     count++;
   }
   savePresets(list, count);
-  Serial.println("Default presets seeded");
+  Serial.println(F("Default presets seeded"));
 }
 
 // ── Favourites ────────────────────────────────────────────────────────────────
@@ -166,10 +222,11 @@ struct Favourite {
 };
 
 void saveFavourites(Favourite* list, uint8_t count) {
+  if (!sdOk) return;
   SD.remove(FAVS_FILE);
-  File f = SD.open(FAVS_FILE, FILE_WRITE);
+  File f = sdOpenWrite(FAVS_FILE);
   if (!f) return;
-  f.println("id,name,meat_target_c,grill_low_c,grill_high_c,preset");
+  f.println(F("id,name,meat_target_c,grill_low_c,grill_high_c,preset"));
   for (uint8_t i = 0; i < count; i++) {
     f.printf("%s,%s,%.1f,%.1f,%.1f,%s\n",
              list[i].id, list[i].name,
@@ -191,8 +248,8 @@ uint8_t loadFavourites(Favourite* list, uint8_t maxCount) {
     line.trim();
     if (line.length() == 0) continue;
 
-    // Split 6 comma-separated fields; preset field may contain commas only if
-    // quoted — for now we use lastIndexOf chain (names don't contain commas).
+    // Split 6 comma-separated fields. Fields are sanitised on write
+    // (csvSanitize) so they can never contain embedded commas.
     int c[5];
     c[0] = line.indexOf(',');
     c[1] = line.indexOf(',', c[0] + 1);
@@ -221,15 +278,17 @@ bool saveCalibration(uint8_t probeIndex,
                      float t1c, float r1,
                      float t2c, float r2,
                      float t3c, float r3,
-                     String timestamp) {
+                     const char* timestamp) {
+  if (!sdOk) return false;
+
   JsonDocument doc;
   if (SD.exists(CAL_FILE)) {
     File f = SD.open(CAL_FILE, FILE_READ);
     if (f) { deserializeJson(doc, f); f.close(); }
   }
 
-  char key[8];
-  snprintf(key, sizeof(key), "probe%d", probeIndex);
+  char key[12];
+  snprintf(key, sizeof(key), "probe%u", probeIndex);
   JsonObject probe = doc[key].to<JsonObject>();
   probe["A"] = coeffs.A;
   probe["B"] = coeffs.B;
@@ -242,11 +301,11 @@ bool saveCalibration(uint8_t probeIndex,
   JsonObject p3 = points.add<JsonObject>(); p3["temp_c"] = t3c; p3["resistance"] = r3;
 
   SD.remove(CAL_FILE);
-  File f = SD.open(CAL_FILE, FILE_WRITE);
+  File f = sdOpenWrite(CAL_FILE);
   if (!f) return false;
   serializeJson(doc, f);
   f.close();
-  Serial.printf("Calibration saved for probe %d\n", probeIndex);
+  Serial.printf("Calibration saved for probe %u\n", probeIndex);
   return true;
 }
 
@@ -260,14 +319,21 @@ void loadCalibration() {
   f.close();
 
   for (uint8_t i = 0; i < 2; i++) {
-    char key[8];
-    snprintf(key, sizeof(key), "probe%d", i);
-    if (doc[key].is<JsonObject>()) {
-      probeCoeffs[i].A = doc[key]["A"].as<float>();
-      probeCoeffs[i].B = doc[key]["B"].as<float>();
-      probeCoeffs[i].C = doc[key]["C"].as<float>();
-      Serial.printf("Loaded calibration for probe %d: A=%.6e B=%.6e C=%.6e\n",
-                    i, probeCoeffs[i].A, probeCoeffs[i].B, probeCoeffs[i].C);
+    char key[12];
+    snprintf(key, sizeof(key), "probe%u", i);
+    if (!doc[key].is<JsonObject>()) continue;
+
+    float A = doc[key]["A"].as<float>();
+    float B = doc[key]["B"].as<float>();
+    float C = doc[key]["C"].as<float>();
+    if (!isfinite(A) || !isfinite(B) || !isfinite(C)) {
+      Serial.printf("Ignoring corrupt calibration for probe %u\n", i);
+      continue;
     }
+    probeCoeffs[i].A = A;
+    probeCoeffs[i].B = B;
+    probeCoeffs[i].C = C;
+    Serial.printf("Loaded calibration for probe %u: A=%.6e B=%.6e C=%.6e\n",
+                  i, A, B, C);
   }
 }

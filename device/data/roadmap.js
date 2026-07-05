@@ -697,6 +697,10 @@ function renderReplayEmpty(message) {
 function renderReplayChart(c, points) {
   const canvas = document.getElementById('replay-chart');
   if (!canvas) return;
+  if (typeof Chart === 'undefined') {
+    renderReplayEmpty('Chart unavailable — chart.js failed to load');
+    return;
+  }
   if (!Array.isArray(points) || points.length === 0) {
     renderReplayEmpty('No data recorded for this cook');
     return;

@@ -144,6 +144,7 @@ function initChart() {
 }
 
 function rebuildChart() {
+  if (!chart) return;
   const { meatTarget, grillLow, grillHigh } = settings;
   const len = meatHistory.length;
 
@@ -169,6 +170,7 @@ function rebuildChart() {
 }
 
 function appendChartPoint(meatC, grillC) {
+  if (!chart) return;
   const { meatTarget, grillLow, grillHigh } = settings;
   chart.data.labels.push(timeLabel(new Date()));
   chart.data.datasets[0].data.push(toDisplay(meatC));
@@ -412,6 +414,7 @@ let reconnectTimer = null;
 let reconnectStep  = 0;
 let offlineSince   = 0;
 let bannerShown    = false;
+let sdWarningShown = false;
 const RECONNECT_DELAYS_MS = [2000, 4000, 8000, 16000, 30000];
 const STALE_THRESHOLD_MS  = 5000;
 const BANNER_THRESHOLD_MS = 15000;
@@ -510,7 +513,9 @@ function connectWS() {
     reconnectStep = 0;
     lastMessageTs = Date.now();
     setConnState('live');
-    sendSettings();
+    // Note: do NOT push local settings here — the device is the source of
+    // truth. Pushing browser defaults on connect used to silently overwrite
+    // the targets persisted on the SD card.
     wsSocket.send(JSON.stringify({ type: 'request_config' }));
     wsSocket.send(JSON.stringify({ type: 'request_cook_list' }));
   });
@@ -529,6 +534,8 @@ function connectWS() {
     if (data.type === 'cook_data')     { handleCookData(data);      return; }
     if (data.type === 'wifi_networks') { handleWifiNetworks(data);  return; }
     if (data.type === 'wifi_saved')    { handleWifiSaved(data);     return; }
+    if (data.type === 'wifi_testing')  { handleWifiTesting(data);   return; }
+    if (data.type === 'fav_result')    { handleFavResult(data);     return; }
     if (data.type === 'cook_started' || data.type === 'cook_stopped') return;
 
     if (!data.meat || !data.grill) return;
@@ -559,6 +566,16 @@ function connectWS() {
     }
 
     if (data.rssi != null) updateSignalStrength(data.rssi);
+
+    // Firmware reports SD health — warn the moment recording stops working
+    if (data.sd === false && !sdWarningShown) {
+      sdWarningShown = true;
+      showBanner('SD card problem — temperatures are NOT being recorded. Check the card.');
+    } else if (data.sd === true && sdWarningShown) {
+      sdWarningShown = false;
+      closeBanner();
+    }
+
     updateUI(meatC, grillC);
   });
 
@@ -752,18 +769,27 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-f').classList.toggle('active', unit === 'F');
   if (unit === 'F') syncSettingsInputs();
 
-  initChart();
+  // Guarded so a missing/corrupt chart.js can degrade the chart, never the
+  // app — the WebSocket layer below must always come up (AP-mode setup
+  // depends on it).
+  if (typeof Chart !== 'undefined') {
+    initChart();
 
-  const wrap = document.querySelector('.chart-wrap');
-  chart.canvas.style.width  = wrap.clientWidth  + 'px';
-  chart.canvas.style.height = wrap.clientHeight + 'px';
-  chart.resize();
+    const wrap = document.querySelector('.chart-wrap');
+    chart.canvas.style.width  = wrap.clientWidth  + 'px';
+    chart.canvas.style.height = wrap.clientHeight + 'px';
+    chart.resize();
 
-  let resizeTimer;
-  window.addEventListener('resize', () => {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => chart.resize(), 400);
-  });
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => { if (chart) chart.resize(); }, 400);
+    });
+  } else {
+    const wrap = document.querySelector('.chart-wrap');
+    if (wrap) wrap.innerHTML =
+      '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:12px;">Chart unavailable — chart.js failed to load</div>';
+  }
 
   connectWS();
   setInterval(tickConnState, 1000);
@@ -1005,14 +1031,35 @@ function wifiSave() {
   wsSocket.send(JSON.stringify({ type: 'wifi_config', ssid, password: pass }));
 }
 
+function handleWifiTesting(data) {
+  const el = document.getElementById('wifi-save-status');
+  if (el) el.textContent = `Trying to join “${data.ssid || 'network'}”…`;
+}
+
 function handleWifiSaved(data) {
   const el  = document.getElementById('wifi-save-status');
   const btn = document.getElementById('wifi-save-btn');
   if (data.saved) {
-    if (el)  el.textContent = 'Saved — device is restarting…';
+    if (el) {
+      el.textContent = data.ip
+        ? `Connected! Device is restarting — rejoin your WiFi and open http://${data.ip} (or http://bbq.local).`
+        : 'Saved — device is restarting…';
+    }
     if (btn) { btn.textContent = 'Restarting…'; btn.disabled = true; }
   } else {
-    if (el)  el.textContent = 'Save failed — check the device SD card.';
+    const reasons = {
+      join_failed:     'Couldn’t join that network — check the password and try again.',
+      busy:            'Device is busy checking a network — try again in a few seconds.',
+      no_ssid:         'Please enter a network name.',
+      fs_write_failed: 'Connected, but saving failed — check the device storage.',
+    };
+    if (el)  el.textContent = reasons[data.reason] || 'Save failed — please try again.';
     if (btn) { btn.textContent = 'Save & Connect'; btn.disabled = false; }
+  }
+}
+
+function handleFavResult(data) {
+  if (!data.saved && data.reason === 'full') {
+    showBanner('Favourites list is full — delete one in Settings to save another.');
   }
 }

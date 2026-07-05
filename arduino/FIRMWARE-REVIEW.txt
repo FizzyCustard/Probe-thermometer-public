@@ -424,3 +424,28 @@ these: **#1 (wifi.json exposure), #2 (CDN Chart.js), #3 (settings clobber),
 #10 (browser timestamps), #11 (trusted calibration).**
 
 Suggested order of attack: 1 → 2 → 3 → 4 → 7 → 6/5 → 9/10/11 → 16 → the rest.
+
+---
+
+## Implementation status (updated 2026-07-05, same day)
+
+All numbered findings (#1–#21) have been implemented and the firmware compiles
+clean (no warnings from project sources) at RAM 51.8% / Flash 44.7%. Also done
+from the recommendation sections: mDNS (`http://bbq.local`), OTA (password in
+config.h), reading smoothing (median-of-3), probe-disconnect debounce
+(3 consecutive bad samples), cook resume after reboot, SD/heap telemetry in the
+broadcast with a UI warning banner, `DEBUG_READINGS` flag, `yield()` +
+head/tail-chunk reads in the cook list, `MAX_POINTS` 240→150, and Chart.js
+bundled locally (plain for Netlify + `.gz` for the ESP, served automatically).
+
+Consciously NOT done here (still tracked in `arduino/IMPROVEMENTS.md`):
+the project-wide String→static-buffer refactor (§1) — invasive and mechanical;
+only the hot-path additions were avoided in new code — and pre-gzipping the
+remaining small web assets. Unpinned git deps in `platformio.ini` also remain
+(CODE_REVIEW #7).
+
+Note for flashing: `config.h` macro names changed — `PROBE1_SH_*`/`PROBE2_SH_*`
+are now `PROBE0_SH_*`/`PROBE1_SH_*` (matching the enable flags), and there are
+new optional defines (`AP_PASSWORD`, `OTA_PASSWORD`, `MDNS_HOSTNAME`,
+`DEBUG_READINGS` — all have safe fallbacks). Re-copy from `config.example.h`
+and re-enter your WiFi credentials.

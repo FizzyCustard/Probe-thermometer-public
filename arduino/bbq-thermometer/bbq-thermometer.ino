@@ -1,4 +1,6 @@
 #include <ESP8266WiFi.h>
+#include <ESP8266mDNS.h>
+#include <ArduinoOTA.h>
 #include <ESPAsyncWebServer.h>
 #include <LittleFS.h>
 #include <Wire.h>
@@ -8,10 +10,19 @@
 #include <WiFiUdp.h>
 #include <time.h>
 
-#define MAX_PRESETS   16
-#define MAX_FAVS      32
-
 #include "config.h"
+
+// Fallbacks so an older config.h (pre-dating these options) still compiles
+#ifndef MDNS_HOSTNAME
+#define MDNS_HOSTNAME "bbq"
+#endif
+#ifndef OTA_PASSWORD
+#define OTA_PASSWORD "bbq-update"
+#endif
+#ifndef DEBUG_READINGS
+#define DEBUG_READINGS 0
+#endif
+
 #include "wifi_manager.h"
 #include "thermistor.h"
 #include "logger.h"
@@ -34,6 +45,12 @@ unsigned long lastBroadcast = 0;
 unsigned long lastLog       = 0;
 unsigned long lastCookSample = 0;
 
+// ── Current readings (sampled once per second, reused everywhere) ────────────
+float   curMeat  = NAN;
+float   curGrill = NAN;
+uint8_t meatBadCount  = 0;
+uint8_t grillBadCount = 0;
+
 // ── Core objects ─────────────────────────────────────────────────────────────
 AsyncWebServer server(80);
 AsyncWebSocket  ws("/ws");
@@ -51,7 +68,7 @@ bool ntpReady() {
 String getTimestamp() {
   time_t t = timeClient.getEpochTime();
   struct tm* tm = gmtime(&t);
-  char buf[21];
+  char buf[72];   // sized for the compiler's worst-case %d expansion
   snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02d",
            tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday,
            tm->tm_hour, tm->tm_min, tm->tm_sec);
@@ -61,10 +78,27 @@ String getTimestamp() {
 String getDateStr() {
   time_t t = timeClient.getEpochTime();
   struct tm* tm = gmtime(&t);
-  char buf[12];
+  char buf[40];   // sized for the compiler's worst-case %d expansion
   snprintf(buf, sizeof(buf), "%04d-%02d-%02d",
            tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday);
   return String(buf);
+}
+
+// ── Probe sampling ────────────────────────────────────────────────────────────
+//
+// Median-of-3 rejects single-sample glitches; the debounce below stops one bad
+// read from blanking the display — only 3 consecutive bad samples (~3 s)
+// declare a probe disconnected.
+
+static float sampleProbe(uint8_t channel, bool enabled, uint8_t& badCount, float prev) {
+  if (!enabled) return NAN;
+  float r = readResistanceMedian(channel);
+  if (r > PROBE_R_MIN && r < PROBE_R_MAX) {
+    badCount = 0;
+    return resistanceToCelsius(r, channel);
+  }
+  if (badCount < 3) badCount++;
+  return badCount >= 3 ? NAN : prev;
 }
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
@@ -75,10 +109,10 @@ void setup() {
 
   // Web UI files from onboard flash
   if (!LittleFS.begin()) {
-    Serial.println("WARNING: LittleFS mount failed — web UI will not be served");
-    Serial.println("  Upload data/ files using the LittleFS upload tool first");
+    Serial.println(F("WARNING: LittleFS mount failed — web UI will not be served"));
+    Serial.println(F("  Upload data/ files using the LittleFS upload tool first"));
   } else {
-    Serial.println("LittleFS mounted OK");
+    Serial.println(F("LittleFS mounted OK"));
   }
 
   // WiFi — try saved credentials, fall back to compiled-in, then AP mode
@@ -106,15 +140,23 @@ void setup() {
     Serial.printf("NTP: %s\n", getTimestamp().c_str());
   }
 
+  // OTA + mDNS — ArduinoOTA.begin() starts the MDNS responder with our
+  // hostname; we then advertise HTTP so the dashboard is at http://bbq.local
+  ArduinoOTA.setHostname(MDNS_HOSTNAME);
+  ArduinoOTA.setPassword(OTA_PASSWORD);
+  ArduinoOTA.begin();
+  MDNS.addService("http", "tcp", 80);
+  Serial.printf("mDNS: http://%s.local  (OTA enabled)\n", MDNS_HOSTNAME);
+
   // ADS1115 over I2C
   Wire.begin();
   adsReady = ads.begin(ADS1115_I2C_ADDRESS);
   if (!adsReady) {
-    Serial.println("ERROR: ADS1115 not found — probe readings disabled");
-    Serial.println("  Check: SDA→D2, SCL→D1, VDD→3.3V, ADDR→GND");
+    Serial.println(F("ERROR: ADS1115 not found — probe readings disabled"));
+    Serial.println(F("  Check: SDA→D2, SCL→D1, VDD→3.3V, ADDR→GND"));
   } else {
     ads.setGain(GAIN_ONE);  // ±4.096 V full scale
-    Serial.println("ADS1115 ready (GAIN_ONE)");
+    Serial.println(F("ADS1115 ready (GAIN_ONE)"));
   }
 
   // SD card: create folder tree, then load all persisted config
@@ -126,10 +168,20 @@ void setup() {
     if (presetCount == 0) seedDefaultPresets(presets, presetCount);
 
     favCount = loadFavourites(favs, MAX_FAVS);
+
+    // Pick up a cook that was running when power was lost
+    cookTryResume();
   }
 
   // WebSocket handler at /ws
   wsBegin(&server);
+
+  // The WiFi credential store lives in the same LittleFS the UI is served
+  // from — explicitly refuse to serve it, or anyone on the network could
+  // download the WiFi password in plaintext.
+  server.on(WIFI_CREDS_PATH, HTTP_ANY, [](AsyncWebServerRequest* req) {
+    req->send(404, "text/plain", "Not found");
+  });
 
   // Serve web UI from LittleFS for every other route
   server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
@@ -142,44 +194,53 @@ void setup() {
     Serial.printf("\nReady — connect to WiFi \"%s\" then open http://%s\n",
                   AP_SSID, WiFi.softAPIP().toString().c_str());
   } else {
-    Serial.printf("\nReady — open http://%s in your browser\n",
-                  WiFi.localIP().toString().c_str());
+    Serial.printf("\nReady — open http://%s or http://%s.local\n",
+                  WiFi.localIP().toString().c_str(), MDNS_HOSTNAME);
   }
 }
 
 // ── Loop ──────────────────────────────────────────────────────────────────────
 
 void loop() {
-  ws.cleanupClients();
   wifiManagerTick();
-  wsProcessPending();   // run deferred (heavy) cook-history reads off the async path
-  if (!isAPMode()) timeClient.update();
+  wsTick();        // deferred SD/scan work, WiFi-test results, scheduled restart
+  loggerTick();    // SD remount attempts after a failure
+  ArduinoOTA.handle();
+  if (!isAPMode()) {
+    timeClient.update();
+    MDNS.update();
+  }
 
   unsigned long now = millis();
 
-  // Read each channel once and reuse for broadcast, logging, and cook samples
-  float rMeat  = PROBE0_ENABLED ? readResistance(ADS1115_CH_MEAT)  : -1.0f;
-  float rGrill = PROBE1_ENABLED ? readResistance(ADS1115_CH_GRILL) : -1.0f;
-  float tMeat  = (rMeat  > 500.0f && rMeat  < 2000000.0f) ? resistanceToCelsius(rMeat,  ADS1115_CH_MEAT)  : NAN;
-  float tGrill = (rGrill > 500.0f && rGrill < 2000000.0f) ? resistanceToCelsius(rGrill, ADS1115_CH_GRILL) : NAN;
-
-  // Push live readings to all connected browsers
+  // Sample both probes once per second and reuse the values for the
+  // broadcast, SD log, and cook samples. (Each ADS1115 read blocks ~8 ms, so
+  // reading on every loop pass would burn ~95% of loop time on readings that
+  // get thrown away.)
   if (now - lastBroadcast >= BROADCAST_INTERVAL_MS) {
     lastBroadcast = now;
-    Serial.printf("[MEAT]  R=%10.0f Ω  T=%.1f°C\n", rMeat,  tMeat);
-    Serial.printf("[GRILL] R=%10.0f Ω  T=%.1f°C\n", rGrill, tGrill);
-    wsBroadcast(tMeat, tGrill, getTimestamp());
+    ws.cleanupClients(4);
+
+    curMeat  = sampleProbe(ADS1115_CH_MEAT,  PROBE0_ENABLED, meatBadCount,  curMeat);
+    curGrill = sampleProbe(ADS1115_CH_GRILL, PROBE1_ENABLED, grillBadCount, curGrill);
+
+#if DEBUG_READINGS
+    Serial.printf("[MEAT]  T=%.1f°C   [GRILL] T=%.1f°C   heap=%u\n",
+                  curMeat, curGrill, ESP.getFreeHeap());
+#endif
+
+    wsBroadcast(curMeat, curGrill, getTimestamp());
   }
 
   // Append CSV row to SD card every LOG_INTERVAL_MS (requires valid NTP timestamp)
   if (!isAPMode() && ntpReady() && now - lastLog >= LOG_INTERVAL_MS) {
     lastLog = now;
-    logReading(getTodayFilename(getDateStr()), getTimestamp(), tMeat, tGrill);
+    logReading(getTodayFilename(getDateStr()), getTimestamp(), curMeat, curGrill);
   }
 
   // Append a cook sample every 30 seconds while a cook is active
   if (activeCook.active && now - lastCookSample >= 30000UL) {
     lastCookSample = now;
-    cookAppendReading(tMeat, tGrill);
+    cookAppendReading(curMeat, curGrill);
   }
 }
