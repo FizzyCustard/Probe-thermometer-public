@@ -5,6 +5,15 @@ The primary focus is memory management, since a cook can run for 8+ hours and th
 ESP8266 has a small heap (~20–40 KB available at runtime) with a simple allocator
 that is vulnerable to fragmentation from repeated allocations and frees.
 
+> **Status update (2026-07-05, commit `286ace6` — the FIRMWARE-REVIEW.txt fix
+> pass):** see the Status column in §4 for every item. Headline: all of §2
+> (stability) is done except 2.5; §3 is done; §1's remaining open items are the
+> mechanical String→static-buffer refactors (1.1, 1.3, 1.4, 1.5) plus 1.6/1.8
+> partials. Note 1.9 landed as `heap` in the 1 Hz WebSocket broadcast (visible
+> in the browser) rather than a Serial print, and 2.3/2.4 landed as a global
+> `sdOk` health flag + 30 s remount (`loggerTick()`) surfaced as a UI warning
+> banner. Some line numbers below have shifted since `286ace6`.
+
 ---
 
 ## 1 · Memory Management (Critical)
@@ -445,22 +454,27 @@ void cookAppendNote(const char* text, float meatC) {
 
 Ordered by impact-to-effort ratio:
 
-| # | Change | Effort | Heap saved over 8 h |
-|---|--------|--------|---------------------|
-| 1.1 | Static broadcast buffer | Low | ~28,800 allocations |
-| 1.2 | `dtostrf()` for float→string | Low | ~13,440 allocations |
-| 1.3 | Shared TX buffer for responses | Low | ~6 allocations/interaction |
-| 1.4 | Static timestamp helpers | Low | ~32,000 allocations (broadcast + log) |
-| 1.5 | Fixed-size CSV line reader | Medium | 48–200 allocations at startup/history |
-| 1.6 | `snprintf` path construction | Low | ~5,760 allocations (log path) |
-| 1.7 | Remove inbound `String` wrap | Low | ~N per client message |
-| 1.8 | Reduce `MAX_FAVS` to 16 | Trivial | 2,112 bytes static RAM freed |
-| 1.9 | Heap monitoring | Low | (observability, not savings) |
-| 2.1 | WiFi reconnection | Low | (stability) |
-| 2.2 | WiFi startup timeout | Low | (stability) |
-| 2.3 | SD write return value | Low | (observability) |
-| 2.4 | SD re-mount recovery | Medium | (stability) |
-| 3.1 | Bounds check in thermistor | Trivial | (safety) |
+| # | Change | Effort | Heap saved over 8 h | Status |
+|---|--------|--------|---------------------|--------|
+| 1.1 | Static broadcast buffer | Low | ~28,800 allocations | ⏳ Open |
+| 1.2 | `dtostrf()` for float→string | Low | ~13,440 allocations | ✅ Done (already in current code) |
+| 1.3 | Shared TX buffer for responses | Low | ~6 allocations/interaction | ⏳ Open |
+| 1.4 | Static timestamp helpers | Low | ~32,000 allocations (broadcast + log) | ⏳ Open |
+| 1.5 | Fixed-size CSV line reader | Medium | 48–200 allocations at startup/history | ⏳ Open |
+| 1.6 | `snprintf` path construction | Low | ~5,760 allocations (log path) | 🟡 Partial — new code (`cook_session`, resume, cal keys) uses `snprintf`; `getTodayFilename()` + WS list paths still `String` |
+| 1.7 | Remove inbound `String` wrap | Low | ~N per client message | ✅ Done in `286ace6` — length-bounded `deserializeJson`, no NUL write past the buffer |
+| 1.8 | Reduce `MAX_FAVS` to 16 | Trivial | 2,112 bytes static RAM freed | 🟡 Partial — defaults unchanged, but `MAX_PRESETS`/`MAX_FAVS` are now `#ifndef`-guarded in `logger.h`, overridable from `config.h` |
+| 1.9 | Heap monitoring | Low | (observability, not savings) | ✅ Done in `286ace6` — `heap` in every 1 Hz broadcast + `DEBUG_READINGS` Serial line |
+| 2.1 | WiFi reconnection | Low | (stability) | ✅ Done in `286ace6` — `WiFi.setAutoReconnect(true)`; AP mode background-retries saved creds every 60 s |
+| 2.2 | WiFi startup timeout | Low | (stability) | ✅ Done earlier — 15 s timeout, then compiled creds, then AP fallback |
+| 2.3 | SD write return value | Low | (observability) | ✅ Done in `286ace6` (as `sdOk` health flag → broadcast → UI banner) |
+| 2.4 | SD re-mount recovery | Medium | (stability) | ✅ Done in `286ace6` — `loggerTick()` remounts every 30 s |
+| 3.1 | Bounds check in thermistor | Trivial | (safety) | ✅ Done in `286ace6` |
+
+Not in the table above: **2.5** (NTP `forceUpdate()` on reconnect) is still open —
+mitigated by auto-reconnect + the 60 s update interval; **3.2** (`const char*`
+timestamp in `saveCalibration`) and **3.4** (cache `cookElapsedSeconds()`) were
+done in `286ace6`; **3.3** needed no action.
 
 Implementing items 1.1–1.4 alone eliminates the vast majority of heap pressure and
 should be enough to make an 8-hour cook reliable.

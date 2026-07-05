@@ -21,29 +21,33 @@ bug, and a settings-clobbering bug that silently undoes the SD persistence work.
 Below those, there's a cluster of blocking-work-in-async-callback issues and a set of
 ESP8266-specific performance/memory wins.
 
-| # | Severity | Finding |
-|---|----------|---------|
-| 1 | Critical | WiFi credentials downloadable at `http://<ip>/wifi.json` |
-| 2 | Critical | Chart.js loaded from CDN — entire UI dead in AP mode / without internet |
-| 3 | Critical | Any connecting browser overwrites the device's persisted targets |
-| 4 | High | Unbounded WebSocket send queue can exhaust heap and crash the device |
-| 5 | High | Blocking `WiFi.scanNetworks()` inside the async WS callback |
-| 6 | High | `delay(1000)` + `ESP.restart()` inside the async WS callback |
-| 7 | High | ADS1115 read on *every* loop iteration (~99% of reads discarded) |
-| 8 | High | Active cook is lost on reboot; file left permanently "in progress" |
-| 9 | High | CSV corruption via commas/newlines in user-supplied names and notes |
-| 10 | Medium | Cook filenames trust the browser clock (collisions, unsanitised chars) |
-| 11 | Medium | Calibration coefficients computed in the browser, trusted blindly |
-| 12 | Medium | AP mode is a dead end — never retries the home network; AP is open |
-| 13 | Medium | `wifi_config` restarts without testing the new credentials |
-| 14 | Medium | `WiFi.persistent()` not disabled — flash wear on every boot |
-| 15 | Medium | `data[len] = '\0'` writes one byte past the frame buffer |
-| 16 | Medium | No SD/heap/status telemetry — SD failures are invisible to the user |
-| 17 | Medium | Settings message applies unvalidated values (missing field → 0 °C) |
-| 18 | Low | Open/short-circuit comments swapped in `readResistance()` |
-| 19 | Low | `PROBE1_*` means "meat" in one macro family and "grill" in another |
-| 20 | Low | Mixed error sentinels (`-999.0f` vs `NAN`) |
-| 21 | Low | Misc: `cleanupClients()` cadence, `pendingReq` atomicity, header coupling, `-Wno-format-truncation` |
+**Status legend (updated 2026-07-05, commit `286ace6`):** ✅ fixed.
+All 21 findings below were implemented the same day; per-item notes in the
+"Implementation status" section at the end of this file.
+
+| # | Severity | Finding | Status |
+|---|----------|---------|--------|
+| 1 | Critical | WiFi credentials downloadable at `http://<ip>/wifi.json` | ✅ Fixed — `/wifi.json` explicitly 404'd before `serveStatic` |
+| 2 | Critical | Chart.js loaded from CDN — entire UI dead in AP mode / without internet | ✅ Fixed — bundled locally (+`.gz` for ESP); chart init guarded |
+| 3 | Critical | Any connecting browser overwrites the device's persisted targets | ✅ Fixed — client no longer pushes settings on connect; device is source of truth |
+| 4 | High | Unbounded WebSocket send queue can exhaust heap and crash the device | ✅ Fixed — `availableForWriteAll()` gate; `cleanupClients(4)` cap |
+| 5 | High | Blocking `WiFi.scanNetworks()` inside the async WS callback | ✅ Fixed — deferred to `loop()` via the pending-request queue |
+| 6 | High | `delay(1000)` + `ESP.restart()` inside the async WS callback | ✅ Fixed — scheduled restart serviced from `loop()` |
+| 7 | High | ADS1115 read on *every* loop iteration (~99% of reads discarded) | ✅ Fixed — sampled once per second; values cached for log/cook |
+| 8 | High | Active cook is lost on reboot; file left permanently "in progress" | ✅ Fixed — `cookTryResume()` on boot; orphans auto-closed |
+| 9 | High | CSV corruption via commas/newlines in user-supplied names and notes | ✅ Fixed — `csvSanitize()` on all user text at write time |
+| 10 | Medium | Cook filenames trust the browser clock (collisions, unsanitised chars) | ✅ Fixed — device NTP preferred; fallback whitelisted; collision suffix |
+| 11 | Medium | Calibration coefficients computed in the browser, trusted blindly | ✅ Fixed — computed on-device via `calcSHCoeffs()` + round-trip check |
+| 12 | Medium | AP mode is a dead end — never retries the home network; AP is open | ✅ Fixed — 60 s background STA retry; WPA2 password on the AP |
+| 13 | Medium | `wifi_config` restarts without testing the new credentials | ✅ Fixed — AP mode tests first, reports result + new IP; STA keeps save-restart |
+| 14 | Medium | `WiFi.persistent()` not disabled — flash wear on every boot | ✅ Fixed — `WiFi.persistent(false)` before any begin/softAP |
+| 15 | Medium | `data[len] = '\0'` writes one byte past the frame buffer | ✅ Fixed — length-bounded `deserializeJson(doc, data, len)` |
+| 16 | Medium | No SD/heap/status telemetry — SD failures are invisible to the user | ✅ Fixed — `sd` + `heap` in broadcast; UI warning banner; 30 s remount |
+| 17 | Medium | Settings message applies unvalidated values (missing field → 0 °C) | ✅ Fixed — presence checks, range clamps, `low < high`, skip-if-unchanged |
+| 18 | Low | Open/short-circuit comments swapped in `readResistance()` | ✅ Fixed — comments corrected |
+| 19 | Low | `PROBE1_*` means "meat" in one macro family and "grill" in another | ✅ Fixed — renamed to `PROBE0_SH_*`/`PROBE1_SH_*` (update your config.h) |
+| 20 | Low | Mixed error sentinels (`-999.0f` vs `NAN`) | ✅ Fixed — `NAN` throughout |
+| 21 | Low | Misc: `cleanupClients()` cadence, `pendingReq` atomicity, header coupling, `-Wno-format-truncation` | ✅ Fixed — all four (cleanup at 1 Hz, volatile kind-written-last, `MAX_*` moved to logger.h, flag removed + warnings fixed) |
 
 Plus dedicated sections on **performance/memory** and **firmware-side UX wins**.
 

@@ -12,26 +12,33 @@ Items already detailed there are only cross-referenced here, not repeated.
 
 No code was changed — this is a review only.
 
+> **Status update (2026-07-05, commit `286ace6` — the FIRMWARE-REVIEW.txt fix
+> pass):** most items below are now resolved; see the Status column. Line
+> numbers in this document refer to the code as it was at review time and have
+> since shifted. Still open: **#5** (non-atomic config writes), **#7** (unpinned
+> library versions), **#13** (fragmented WS messages — documented latent limit),
+> and the JSON-size half of **#8**.
+
 ---
 
 ## Summary
 
-| # | Severity | Issue | Location |
-|---|----------|-------|----------|
-| 1 | High | WiFi connect blocks forever at boot (no timeout) | `bbq-thermometer.ino:82-85` |
-| 2 | High | No WiFi reconnection in `loop()` | `bbq-thermometer.ino:130-161` |
-| 3 | High | Blocking SD I/O inside async WebSocket callbacks | `websocket_handler.h:139-294` |
-| 4 | High | ADS1115 init failure is ignored; garbage temps logged | `bbq-thermometer.ino:95-101`, `loop()` |
-| 5 | Medium | Non-atomic config writes (remove-then-write) | `logger.h` (multiple) |
-| 6 | Medium | NTP sync never validated before timestamping | `bbq-thermometer.ino:88-91` |
-| 7 | Medium | Unpinned library versions | `platformio.ini:22-26` |
-| 8 | Medium | Cook-list response unbounded in size | `websocket_handler.h:134-185` |
-| 9 | Low | No `probeIndex` bounds check in `resistanceToCelsius` | `thermistor.h:44-50` |
-| 10 | Low | `1.0f/invT` not guarded against 0 / non-finite | `thermistor.h:48-49` |
-| 11 | Low | Firmware `calcSHCoeffs` can divide by zero (equal R) | `thermistor.h:86-108` |
-| 12 | Low | `cal_save` reads `points[0..2]` without validating array | `websocket_handler.h:326-331` |
-| 13 | Low | WS handler silently drops fragmented messages | `websocket_handler.h:412-420` |
-| 14 | Low | Config hygiene (placeholder SSID, no target clamping) | `config.example.h`, `websocket_handler.h:30-38` |
+| # | Severity | Issue | Location | Status |
+|---|----------|-------|----------|--------|
+| 1 | High | WiFi connect blocks forever at boot (no timeout) | `bbq-thermometer.ino:82-85` | ✅ Fixed earlier (15 s timeout + AP fallback) |
+| 2 | High | No WiFi reconnection in `loop()` | `bbq-thermometer.ino:130-161` | ✅ Fixed in `286ace6` — `WiFi.setAutoReconnect(true)`; AP mode retries saved creds every 60 s |
+| 3 | High | Blocking SD I/O inside async WebSocket callbacks | `websocket_handler.h:139-294` | ✅ Fixed earlier (deferred queue); `286ace6` extends it to WiFi scans + head/tail chunk reads |
+| 4 | High | ADS1115 init failure is ignored; garbage temps logged | `bbq-thermometer.ino:95-101`, `loop()` | ✅ Fixed earlier (`adsReady` gate) |
+| 5 | Medium | Non-atomic config writes (remove-then-write) | `logger.h` (multiple) | ⏳ Open |
+| 6 | Medium | NTP sync never validated before timestamping | `bbq-thermometer.ino:88-91` | ✅ Fixed — `ntpReady()` gates logging; cook timestamps prefer device NTP (`286ace6`) |
+| 7 | Medium | Unpinned library versions | `platformio.ini:22-26` | ⏳ Open |
+| 8 | Medium | Cook-list response unbounded in size | `websocket_handler.h:134-185` | 🟡 Partial (`286ace6`) — per-file cost now O(1) via head/tail reads, cook-data capped at 150 points; list JSON still grows with cook count |
+| 9 | Low | No `probeIndex` bounds check in `resistanceToCelsius` | `thermistor.h:44-50` | ✅ Fixed in `286ace6` |
+| 10 | Low | `1.0f/invT` not guarded against 0 / non-finite | `thermistor.h:48-49` | ✅ Fixed (`invT <= 0` → `NAN`) |
+| 11 | Low | Firmware `calcSHCoeffs` can divide by zero (equal R) | `thermistor.h:86-108` | ✅ Fixed in `286ace6` — equal-R rejection + `isfinite` check; path is now live (firmware computes coefficients itself) |
+| 12 | Low | `cal_save` reads `points[0..2]` without validating array | `websocket_handler.h:326-331` | ✅ Fixed in `286ace6` — presence-checked, plus round-trip sanity check |
+| 13 | Low | WS handler silently drops fragmented messages | `websocket_handler.h:412-420` | ⏳ Open (latent limit; all current messages are single-frame) |
+| 14 | Low | Config hygiene (placeholder SSID, no target clamping) | `config.example.h`, `websocket_handler.h:30-38` | ✅ Fixed — placeholder-SSID check earlier; range clamps in `286ace6` |
 
 ---
 
