@@ -1,7 +1,11 @@
 # BBQ Monitor — .gitignore
 
-# Credentials — copy config.example.h to config.h and fill in your values
-arduino/bbq-thermometer/config.h
+# Credentials — copy config.example.h to config.h and fill in your values.
+# Matched in ANY directory (a stray config.h at the repo root was previously
+# left exposed), plus local backup copies such as config.h.bak.
+# config.example.h holds placeholders only and stays tracked.
+config.h
+config.h.*
 
 # PlatformIO build artifacts — generated locally, not for version control
 .pio/
