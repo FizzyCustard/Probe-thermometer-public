@@ -711,20 +711,29 @@ void wsBroadcast(float meatC, float grillC, String timestamp) {
   // ever-shrinking heap until the device resets.
   if (!ws.availableForWriteAll()) return;
 
+  // A cook carries its own targets, which may differ from the persisted
+  // globals. The tick reports the target *in force right now* so external
+  // monitors don't alarm against a stale global; the cook's values are also
+  // echoed explicitly below for clients that want to tell the two apart.
+  const bool ck = activeCook.active;
+
   JsonDocument doc;
   doc["ts"]          = timestamp;
   doc["meat"]["c"]   = meatC;
   doc["grill"]["c"]  = grillC;
-  doc["meat_target"] = meatTarget;
-  doc["grill_low"]   = grillLow;
-  doc["grill_high"]  = grillHigh;
+  doc["meat_target"] = ck ? activeCook.meatTargetC : meatTarget;
+  doc["grill_low"]   = ck ? activeCook.grillLowC   : grillLow;
+  doc["grill_high"]  = ck ? activeCook.grillHighC  : grillHigh;
   doc["sd"]          = sdOk;
   doc["heap"]        = ESP.getFreeHeap();
 
-  if (activeCook.active) {
-    doc["cook_active"]    = true;
-    doc["cook_name"]      = activeCook.name;
-    doc["cook_elapsed_s"] = cookElapsedSeconds();
+  if (ck) {
+    doc["cook_active"]      = true;
+    doc["cook_name"]        = activeCook.name;
+    doc["cook_elapsed_s"]   = cookElapsedSeconds();
+    doc["cook_meat_target"] = activeCook.meatTargetC;
+    doc["cook_grill_low"]   = activeCook.grillLowC;
+    doc["cook_grill_high"]  = activeCook.grillHighC;
   } else {
     doc["cook_active"] = false;
   }
