@@ -1,34 +1,11 @@
 // ═══════════════════════════════════════════════════════════════════════════
-//  Probe Therm — Roadmap Prototype
-//  Extends the existing demo dashboard with:
+//  Probe Therm — Cook features
+//  Extends the dashboard with:
 //    • Cook History (Start/Stop, sessions, replay)
 //    • Favourites (save/load named configs)
 //    • Cook Notes (timeline, mid-cook annotations)
 //    • Preset Temperatures (chip selector)
 // ═══════════════════════════════════════════════════════════════════════════
-
-// ── Demo data: favourites only. Cook history comes from SD via WS.
-
-window.__demoFavourites = [
-  {
-    id: 'f-1',
-    name: 'Sunday Brisket',
-    targets: { meatTarget: 95, grillLow: 105, grillHigh: 130 },
-    preset: 'Brisket / pulled pork',
-  },
-  {
-    id: 'f-2',
-    name: 'Reverse Sear Ribeye',
-    targets: { meatTarget: 54, grillLow: 110, grillHigh: 130 },
-    preset: 'Beef — medium rare',
-  },
-  {
-    id: 'f-3',
-    name: 'Low & Slow Pork Shoulder',
-    targets: { meatTarget: 92, grillLow: 105, grillHigh: 125 },
-    preset: 'Brisket / pulled pork',
-  },
-];
 
 // ── Preset table from ROADMAP.md ─────────────────────────────────────────
 window.__presets = [
@@ -59,7 +36,7 @@ window.__cookState = {
   preset: null,
   notes: [],          // [{ ts (seconds since cook start), text, system?, temp? }]
   history: [],   // populated from SD card via cook_list WS message
-  favourites: window.__demoFavourites.slice(),
+  favourites: [],     // populated from SD card via the config WS message
   selectedHistoryId: null,
   view: 'live',       // 'live' | 'history'
 };

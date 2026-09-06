@@ -110,7 +110,7 @@ void setup() {
   // Web UI files from onboard flash
   if (!LittleFS.begin()) {
     Serial.println(F("WARNING: LittleFS mount failed — web UI will not be served"));
-    Serial.println(F("  Upload data/ files using the LittleFS upload tool first"));
+    Serial.println(F("  Upload device/data/ files using the LittleFS upload tool first"));
   } else {
     Serial.println(F("LittleFS mounted OK"));
   }

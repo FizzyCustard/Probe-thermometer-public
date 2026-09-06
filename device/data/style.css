@@ -1653,12 +1653,6 @@ main > * {
   background: var(--primary-dim);
   color: var(--primary);
 }
-.connection-pill.demo {
-  background: rgba(255, 165, 0, 0.12);
-  color: #ffaa00;
-  border-color: rgba(255, 165, 0, 0.3);
-}
-
 /* ── WiFi settings section ─────────────────────────────────────────────────── */
 
 .wifi-actions {

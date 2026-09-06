@@ -296,8 +296,8 @@ ESP8266 applies the coefficients immediately, saves to SD, responds:
 Upload the `device/data/` folder using the LittleFS Upload Tool (Arduino IDE)
 or `pio run --target uploadfs` (PlatformIO).
 
-The `device/data/` folder is the copy of the web UI intended for the ESP8266.
-The `data/` folder at the repo root is the Netlify demo site — keep it separate.
+The `device/data/` folder is the web UI served from LittleFS, and the only
+copy — `platformio.ini` points `data_dir` at it.
 
 ### Combined firmware + filesystem upload
 
