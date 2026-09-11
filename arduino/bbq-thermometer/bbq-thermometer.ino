@@ -28,6 +28,7 @@
 #include "logger.h"
 #include "cook_session.h"
 #include "websocket_handler.h"
+#include "api_handler.h"
 
 // ── Runtime settings — overridable via browser WebSocket ────────────────────
 float meatTarget = DEFAULT_MEAT_TARGET;
@@ -46,8 +47,10 @@ unsigned long lastLog       = 0;
 unsigned long lastCookSample = 0;
 
 // ── Current readings (sampled once per second, reused everywhere) ────────────
-float   curMeat  = NAN;
-float   curGrill = NAN;
+float   curMeat   = NAN;
+float   curGrill  = NAN;
+float   curMeatR  = NAN;   // median-filtered resistance behind curMeat (Ω)
+float   curGrillR = NAN;
 uint8_t meatBadCount  = 0;
 uint8_t grillBadCount = 0;
 
@@ -90,15 +93,22 @@ String getDateStr() {
 // read from blanking the display — only 3 consecutive bad samples (~3 s)
 // declare a probe disconnected.
 
-static float sampleProbe(uint8_t channel, bool enabled, uint8_t& badCount, float prev) {
-  if (!enabled) return NAN;
+//
+// `rOut` receives the resistance behind the returned temperature (NAN when
+// disconnected, previous value while debouncing) so the tick can carry both.
+
+static float sampleProbe(uint8_t channel, bool enabled, uint8_t& badCount,
+                         float prev, float& rOut) {
+  if (!enabled) { rOut = NAN; return NAN; }
   float r = readResistanceMedian(channel);
   if (r > PROBE_R_MIN && r < PROBE_R_MAX) {
     badCount = 0;
+    rOut = r;
     return resistanceToCelsius(r, channel);
   }
   if (badCount < 3) badCount++;
-  return badCount >= 3 ? NAN : prev;
+  if (badCount >= 3) { rOut = NAN; return NAN; }
+  return prev;   // rOut untouched: keeps the previous resistance while debouncing
 }
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
@@ -176,6 +186,10 @@ void setup() {
   // WebSocket handler at /ws
   wsBegin(&server);
 
+  // Read-only JSON snapshot for external apps. Registered BEFORE the
+  // serveStatic("/") below, which matches the "/" prefix.
+  apiBegin(&server);
+
   // The WiFi credential store lives in the same LittleFS the UI is served
   // from — explicitly refuse to serve it, or anyone on the network could
   // download the WiFi password in plaintext.
@@ -221,15 +235,15 @@ void loop() {
     lastBroadcast = now;
     ws.cleanupClients(4);
 
-    curMeat  = sampleProbe(ADS1115_CH_MEAT,  PROBE0_ENABLED, meatBadCount,  curMeat);
-    curGrill = sampleProbe(ADS1115_CH_GRILL, PROBE1_ENABLED, grillBadCount, curGrill);
+    curMeat  = sampleProbe(ADS1115_CH_MEAT,  PROBE0_ENABLED, meatBadCount,  curMeat,  curMeatR);
+    curGrill = sampleProbe(ADS1115_CH_GRILL, PROBE1_ENABLED, grillBadCount, curGrill, curGrillR);
 
 #if DEBUG_READINGS
-    Serial.printf("[MEAT]  T=%.1f°C   [GRILL] T=%.1f°C   heap=%u\n",
-                  curMeat, curGrill, ESP.getFreeHeap());
+    Serial.printf("[MEAT]  T=%.1f°C %.0fΩ   [GRILL] T=%.1f°C %.0fΩ   heap=%u\n",
+                  curMeat, curMeatR, curGrill, curGrillR, ESP.getFreeHeap());
 #endif
 
-    wsBroadcast(curMeat, curGrill, getTimestamp());
+    wsBroadcast(curMeat, curGrill, curMeatR, curGrillR, getTimestamp());
   }
 
   // Append CSV row to SD card every LOG_INTERVAL_MS (requires valid NTP timestamp)

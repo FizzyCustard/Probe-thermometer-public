@@ -212,92 +212,64 @@
         <div class="settings-group-title">Probe Calibration</div>
         <div class="settings-card">
           <button class="cal-header" onclick="toggleCal()" aria-expanded="false" id="cal-toggle-btn" style="padding: 0 0 8px;">
-            <span class="cal-header-title">Calibrate probes</span>
+            <span class="cal-header-text">
+              <span class="cal-header-title">Calibrate probes</span>
+              <span class="cal-badges" id="cal-badges"></span>
+            </span>
             <span class="cal-chevron" id="cal-chevron">▾</span>
           </button>
+
+          <!-- Wizard: three baths with both probes at once, then review & save.
+               Everything inside is driven by the calibration section of app.js. -->
           <div class="cal-body" id="cal-body" hidden>
-            <p class="cal-desc">Place each probe in a medium at a known temperature. Record three reference points, then calculate and save the Steinhart-Hart coefficients to the SD card.</p>
-
-            <!-- Meat probe calibration -->
-            <div class="cal-probe">
-              <div class="cal-probe-label">MEAT PROBE</div>
-              <div class="cal-points" id="cal-meat-points">
-                <div class="cal-point-row">
-                  <span class="cal-pt-num">1</span>
-                  <div class="input-wrap cal-temp-wrap">
-                    <input type="number" id="cal-meat-t1" value="0">
-                    <span class="input-unit">°C</span>
-                  </div>
-                  <button class="btn-record" onclick="recordPoint('meat',0)" id="cal-meat-btn-0">Record</button>
-                  <span class="cal-resistance" id="cal-meat-r0">--</span>
-                </div>
-                <div class="cal-point-row">
-                  <span class="cal-pt-num">2</span>
-                  <div class="input-wrap cal-temp-wrap">
-                    <input type="number" id="cal-meat-t2" value="25">
-                    <span class="input-unit">°C</span>
-                  </div>
-                  <button class="btn-record" onclick="recordPoint('meat',1)" id="cal-meat-btn-1">Record</button>
-                  <span class="cal-resistance" id="cal-meat-r1">--</span>
-                </div>
-                <div class="cal-point-row">
-                  <span class="cal-pt-num">3</span>
-                  <div class="input-wrap cal-temp-wrap">
-                    <input type="number" id="cal-meat-t3" value="100">
-                    <span class="input-unit">°C</span>
-                  </div>
-                  <button class="btn-record" onclick="recordPoint('meat',2)" id="cal-meat-btn-2">Record</button>
-                  <span class="cal-resistance" id="cal-meat-r2">--</span>
-                </div>
-              </div>
-              <button class="btn-calculate" id="cal-meat-calc" onclick="calculateCoeffs('meat')" disabled>Calculate &amp; Save</button>
-              <div class="cal-coeffs hidden" id="cal-meat-result">
-                <span class="cal-coeff-item">A: <span id="cal-meat-A">--</span></span>
-                <span class="cal-coeff-item">B: <span id="cal-meat-B">--</span></span>
-                <span class="cal-coeff-item">C: <span id="cal-meat-C">--</span></span>
-              </div>
+            <div class="cal-step-head">
+              <div class="cal-progress" id="cal-progress" aria-hidden="true"></div>
+              <span class="cal-step-count" id="cal-step-count">Step 1 of 4</span>
+              <h3 class="cal-step-title" id="cal-step-title">Ice bath</h3>
+              <p class="cal-desc" id="cal-step-hint"></p>
             </div>
 
-            <!-- Grill probe calibration -->
-            <div class="cal-probe">
-              <div class="cal-probe-label">GRILL PROBE</div>
-              <div class="cal-points" id="cal-grill-points">
-                <div class="cal-point-row">
-                  <span class="cal-pt-num">1</span>
-                  <div class="input-wrap cal-temp-wrap">
-                    <input type="number" id="cal-grill-t1" value="0">
-                    <span class="input-unit">°C</span>
-                  </div>
-                  <button class="btn-record" onclick="recordPoint('grill',0)" id="cal-grill-btn-0">Record</button>
-                  <span class="cal-resistance" id="cal-grill-r0">--</span>
+            <div class="cal-bath" id="cal-bath-panel">
+              <label class="cal-ref-row">
+                <span class="cal-ref-label">Reference temperature</span>
+                <span class="input-wrap cal-temp-wrap">
+                  <input type="number" id="cal-ref" step="0.1" inputmode="decimal" oninput="calRefChanged()">
+                  <span class="input-unit" id="cal-ref-unit">°C</span>
+                </span>
+              </label>
+
+              <div class="cal-live-grid">
+                <div class="cal-live-card" id="cal-live-meat">
+                  <div class="cal-live-name">MEAT</div>
+                  <div class="cal-live-temp" id="cal-live-meat-temp">--</div>
+                  <div class="cal-live-res" id="cal-live-meat-res">-- Ω</div>
+                  <div class="cal-live-pill" id="cal-live-meat-pill" data-state="waiting">waiting for readings…</div>
+                  <div class="cal-live-cap" id="cal-live-meat-cap"></div>
                 </div>
-                <div class="cal-point-row">
-                  <span class="cal-pt-num">2</span>
-                  <div class="input-wrap cal-temp-wrap">
-                    <input type="number" id="cal-grill-t2" value="25">
-                    <span class="input-unit">°C</span>
-                  </div>
-                  <button class="btn-record" onclick="recordPoint('grill',1)" id="cal-grill-btn-1">Record</button>
-                  <span class="cal-resistance" id="cal-grill-r1">--</span>
-                </div>
-                <div class="cal-point-row">
-                  <span class="cal-pt-num">3</span>
-                  <div class="input-wrap cal-temp-wrap">
-                    <input type="number" id="cal-grill-t3" value="100">
-                    <span class="input-unit">°C</span>
-                  </div>
-                  <button class="btn-record" onclick="recordPoint('grill',2)" id="cal-grill-btn-2">Record</button>
-                  <span class="cal-resistance" id="cal-grill-r2">--</span>
+                <div class="cal-live-card" id="cal-live-grill">
+                  <div class="cal-live-name">GRILL</div>
+                  <div class="cal-live-temp" id="cal-live-grill-temp">--</div>
+                  <div class="cal-live-res" id="cal-live-grill-res">-- Ω</div>
+                  <div class="cal-live-pill" id="cal-live-grill-pill" data-state="waiting">waiting for readings…</div>
+                  <div class="cal-live-cap" id="cal-live-grill-cap"></div>
                 </div>
               </div>
-              <button class="btn-calculate" id="cal-grill-calc" onclick="calculateCoeffs('grill')" disabled>Calculate &amp; Save</button>
-              <div class="cal-coeffs hidden" id="cal-grill-result">
-                <span class="cal-coeff-item">A: <span id="cal-grill-A">--</span></span>
-                <span class="cal-coeff-item">B: <span id="cal-grill-B">--</span></span>
-                <span class="cal-coeff-item">C: <span id="cal-grill-C">--</span></span>
-              </div>
+
+              <p class="cal-msg" id="cal-msg"></p>
+              <button class="btn-calculate cal-capture" id="cal-capture-btn" onclick="calCapture()" disabled>Capture both</button>
             </div>
 
+            <div class="cal-review" id="cal-review-panel" hidden>
+              <div id="cal-review-body"></div>
+              <button class="btn-calculate cal-capture" id="cal-save-btn" onclick="calSave()" disabled>Save both</button>
+              <p class="cal-msg" id="cal-save-msg"></p>
+            </div>
+
+            <div class="cal-nav">
+              <button class="cal-nav-btn" id="cal-back-btn" onclick="calBack()" disabled>◂ Back</button>
+              <button class="cal-nav-link" id="cal-reset-btn" onclick="calStartOver()">Start over</button>
+              <button class="cal-nav-btn primary" id="cal-next-btn" onclick="calNext()" disabled>Next ▸</button>
+            </div>
           </div>
         </div>
       </div>

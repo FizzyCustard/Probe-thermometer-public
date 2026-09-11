@@ -232,7 +232,8 @@ function updateUI(meatC, grillC) {
     document.getElementById('meat-target-label').textContent = `Target ${fmtWithUnit(meatTarget)}`;
 
     const meatCard = document.getElementById('meat-card');
-    if (meatC >= meatTarget && !alertFired) {
+    // A probe in boiling water during calibration is not a finished brisket
+    if (meatC >= meatTarget && !alertFired && !calIsOpen()) {
       alertFired = true;
       meatCard.classList.add('state-reached');
       document.getElementById('meat-pill').textContent = 'TARGET REACHED';
@@ -342,6 +343,7 @@ function setUnit(u) {
     const g = grillHistory[grillHistory.length - 1].c;
     updateUI(m, g);
   }
+  if (calIsOpen()) calRender();
 }
 
 // ── Settings sheet ───────────────────────────────────────────────────────────
@@ -417,7 +419,6 @@ let sdWarningShown = false;
 const RECONNECT_DELAYS_MS = [2000, 4000, 8000, 16000, 30000];
 const STALE_THRESHOLD_MS  = 5000;
 const BANNER_THRESHOLD_MS = 15000;
-const pendingCalTemp = { meat: [null, null, null], grill: [null, null, null] };
 
 function isLive() { return connState === 'live'; }
 
@@ -515,7 +516,6 @@ function connectWS() {
     let data;
     try { data = JSON.parse(e.data); } catch { return; }
 
-    if (data.type === 'cal_reading')   { handleCalReading(data);   return; }
     if (data.type === 'cal_saved')     { handleCalSaved(data);     return; }
     if (data.type === 'config')        { handleConfig(data);        return; }
     if (data.type === 'cook_list')     { handleCookList(data);      return; }
@@ -541,6 +541,9 @@ function connectWS() {
     const meatC  = data.meat.c  != null ? parseFloat(data.meat.c)  : null;
     const grillC = data.grill.c != null ? parseFloat(data.grill.c) : null;
     const now    = Date.now();
+
+    // Raw resistances feed the calibration wizard's settling/capture buffers
+    calFeed(meatC, data.meat.r, grillC, data.grill.r);
 
     // Add a chart point every 30 s (only for connected probes)
     if (now - lastChartAdd >= 30000) {
@@ -649,6 +652,8 @@ function handleConfig(data) {
     window.__cookState.active = false;
   }
 
+  if (data.calibration) calSetInfo(data.calibration);
+
   if (data.ap_mode) setAPModeBanner(true);
   updateWifiStatusLine();
 }
@@ -733,12 +738,44 @@ document.addEventListener('DOMContentLoaded', () => {
   setInterval(tickConnState, 1000);
 });
 
-// ── Calibration ──────────────────────────────────────────────────────────────
+// ── Calibration wizard ───────────────────────────────────────────────────────
+//
+// Four steps: three baths (both probes at once) then review & save. Every 1 s
+// tick carries each probe's median-filtered resistance, so the wizard watches
+// those live, shows when a probe has settled, and captures the mean of the
+// last few seconds rather than a single sample. The firmware recomputes and
+// validates the coefficients itself; the maths here only drives the preview.
 
-const calState = {
-  meat:  [null, null, null],
-  grill: [null, null, null],
+const CAL_PROBES     = ['meat', 'grill'];
+const CAL_BUF_LEN    = 8;      // seconds of readings behind the stability check
+const CAL_STABLE_C   = 0.3;    // °C spread across the buffer that counts as settled
+const CAL_MIN_SAMPLES = 3;     // readings needed before a capture is allowed
+const CAL_DRAFT_KEY  = 'bbq_cal_draft';
+
+const CAL_STEPS = [
+  { title: 'Ice bath', defaultC: 0,
+    hint: 'Fill a cup with crushed ice, top up with just enough cold water to cover it, and stir. Put BOTH probe tips in the middle of the ice, not touching the cup, and wait for the readings to settle.' },
+  { title: 'Room temperature', defaultC: 25,
+    hint: 'Leave both probes in still air or a glass of room-temperature water next to a thermometer you trust. Enter what that thermometer reads — any temperature well between the other two baths is fine.' },
+  { title: 'Boiling water', defaultC: 100,
+    hint: 'Bring a pan to a rolling boil and hold both tips in the water, clear of the bottom. At sea level that is 100 °C; knock off roughly 1 °C for every 300 m of altitude.' },
+  { title: 'Review & save' },
+];
+
+const cal = {
+  open:    false,
+  step:    0,
+  refC:    CAL_STEPS.slice(0, 3).map(s => s.defaultC),
+  points:  { meat: [null, null, null], grill: [null, null, null] }, // {tempC, resistance, drifting}
+  live:    { meat: [], grill: [] },                                   // ring buffers of {c, r}
+  info:    { meat: null, grill: null },                               // from config: {calibrated, source, points}
+  results: null,                                                      // last cal_saved reply, keyed by probe
+  saving:  false,
 };
+
+function calIsOpen() { return cal.open; }
+
+// ── Maths (mirrors thermistor.h) ──
 
 function calcSHCoeffs(points) {
   const [p1, p2, p3] = points;
@@ -753,86 +790,434 @@ function calcSHCoeffs(points) {
   return { A, B, C };
 }
 
+function shToC(coeffs, resistance) {
+  if (!(resistance > 0)) return NaN;
+  const L = Math.log(resistance);
+  const invT = coeffs.A + coeffs.B * L + coeffs.C * L * L * L;
+  return invT > 0 ? 1 / invT - 273.15 : NaN;
+}
+
+// Same checks, same order and same reason strings as calibrateFromPoints()
+// in the firmware, so the review can flag a bad point before the round trip.
+function calValidate(pts) {
+  for (let i = 0; i < 3; i++) {
+    const p = pts[i];
+    if (!p || !isFinite(p.tempC) || !isFinite(p.resistance) || p.resistance <= 0 ||
+        p.tempC < -50 || p.tempC > 350) return { reason: 'bad_input', point: i };
+  }
+  const idx = [0, 1, 2].sort((a, b) => pts[a].tempC - pts[b].tempC);
+  for (let k = 0; k < 2; k++) {
+    const lo = pts[idx[k]], hi = pts[idx[k + 1]];
+    if (hi.tempC - lo.tempC < 0.5)     return { reason: 'temps_too_close', point: idx[k + 1] };
+    if (hi.resistance >= lo.resistance) return { reason: 'not_monotonic',   point: idx[k + 1] };
+  }
+  const coeffs = calcSHCoeffs(pts);
+  if (![coeffs.A, coeffs.B, coeffs.C].every(isFinite)) return { reason: 'degenerate' };
+  for (let i = 0; i < 3; i++) {
+    const t = shToC(coeffs, pts[i].resistance);
+    if (!isFinite(t) || Math.abs(t - pts[i].tempC) > 3) return { reason: 'roundtrip', point: i };
+  }
+  return { ok: true, coeffs };
+}
+
+const CAL_REASONS = {
+  bad_input:       'One of the points is not a valid number.',
+  temps_too_close: 'Two reference temperatures are within 0.5 °C of each other.',
+  not_monotonic:   'Resistance did not fall as temperature rose. Was the probe actually in that bath?',
+  degenerate:      'These points cannot be solved. Re-capture and try again.',
+  roundtrip:       'One point does not fit the curve through the other two.',
+  sd_write_failed: 'Applied and in use now, but saving to the SD card failed. It will be lost on reboot.',
+};
+
+// ── Live readings ──
+
+function calFeed(meatC, meatR, grillC, grillR) {
+  const push = (probe, c, r) => {
+    const buf = cal.live[probe];
+    buf.push({ c: c != null ? c : null, r: r != null ? parseFloat(r) : null });
+    if (buf.length > CAL_BUF_LEN) buf.shift();
+  };
+  push('meat',  meatC,  meatR);
+  push('grill', grillC, grillR);
+  if (cal.open && cal.step < 3) calRenderLive();
+  else if (cal.open)            calRenderReviewLive();
+}
+
+function calStats(probe) {
+  const samples = cal.live[probe].filter(s => s.r != null && s.c != null);
+  const last    = cal.live[probe][cal.live[probe].length - 1];
+  if (!isLive() || !last)       return { state: 'waiting', n: 0 };
+  if (last.r == null)           return { state: 'off',     n: 0 };
+  if (samples.length < CAL_MIN_SAMPLES) return { state: 'waiting', n: samples.length, c: last.c, r: last.r };
+
+  const cs = samples.map(s => s.c);
+  const spread = Math.max(...cs) - Math.min(...cs);
+  const drift  = cs[cs.length - 1] - cs[0];
+  const meanR  = samples.reduce((a, s) => a + s.r, 0) / samples.length;
+  const full   = samples.length >= CAL_BUF_LEN;
+  return {
+    state: full && spread <= CAL_STABLE_C ? 'stable' : 'settling',
+    n: samples.length, c: last.c, r: last.r, spread, drift, meanR,
+  };
+}
+
+// ── Open / close ──
+
 function toggleCal() {
   const body    = document.getElementById('cal-body');
   const chevron = document.getElementById('cal-chevron');
   const btn     = document.getElementById('cal-toggle-btn');
-  const open    = body.hidden;
-  body.hidden   = !open;
-  chevron.textContent = open ? '▴' : '▾';
-  btn.setAttribute('aria-expanded', String(open));
+  cal.open      = body.hidden;
+  body.hidden   = !cal.open;
+  chevron.textContent = cal.open ? '▴' : '▾';
+  btn.setAttribute('aria-expanded', String(cal.open));
+  if (cal.open) calRender();
 }
 
-function recordPoint(probe, index) {
-  const tempC = parseFloat(document.getElementById(`cal-${probe}-t${index + 1}`).value);
-  if (isNaN(tempC)) return;
+// ── Rendering ──
 
-  const btn = document.getElementById(`cal-${probe}-btn-${index}`);
-  btn.textContent = 'Reading…';
-  btn.disabled = true;
+function calRender() {
+  const isReview = cal.step === 3;
+  const stepDef  = CAL_STEPS[cal.step];
 
-  if (!isLive() || !wsSocket) {
-    btn.textContent = 'Not connected';
-    btn.disabled = false;
-    return;
+  document.getElementById('cal-step-count').textContent = `Step ${cal.step + 1} of ${CAL_STEPS.length}`;
+  document.getElementById('cal-step-title').textContent = stepDef.title;
+  document.getElementById('cal-step-hint').textContent  = stepDef.hint || '';
+
+  const dots = document.getElementById('cal-progress');
+  dots.innerHTML = '';
+  CAL_STEPS.forEach((_, i) => {
+    const d = document.createElement('span');
+    d.className = 'cal-dot' + (i === cal.step ? ' current' : '') + (i < 3 && calStepCaptured(i) ? ' done' : '');
+    dots.appendChild(d);
+  });
+
+  document.getElementById('cal-bath-panel').hidden   = isReview;
+  document.getElementById('cal-review-panel').hidden = !isReview;
+  document.getElementById('cal-back-btn').disabled   = cal.step === 0;
+  document.getElementById('cal-next-btn').hidden     = isReview;
+
+  if (isReview) {
+    calRenderReview();
+  } else {
+    const ref = document.getElementById('cal-ref');
+    ref.value = unit === 'F' ? cToF(cal.refC[cal.step]).toFixed(1).replace(/\.0$/, '') : String(cal.refC[cal.step]);
+    document.getElementById('cal-ref-unit').textContent = unitLabel();
+    calRenderLive();
   }
-  pendingCalTemp[probe][index] = tempC;
-  wsSocket.send(JSON.stringify({
-    type:  'cal_read',
-    probe: probe === 'meat' ? 0 : 1,
-    point: index,
-  }));
 }
 
-function updateCalPointUI(probe, index, resistance) {
-  document.getElementById(`cal-${probe}-r${index}`).textContent =
-    Math.round(resistance).toLocaleString() + ' Ω';
-  const btn = document.getElementById(`cal-${probe}-btn-${index}`);
-  btn.textContent = 'Recorded ✓';
-  btn.disabled    = false;
-  btn.classList.add('recorded');
-  if (calState[probe].every(p => p !== null)) {
-    document.getElementById(`cal-${probe}-calc`).disabled = false;
+function calStepCaptured(step) {
+  return CAL_PROBES.some(p => cal.points[p][step] !== null);
+}
+
+function calRefChanged() {
+  const raw = parseFloat(document.getElementById('cal-ref').value);
+  if (isNaN(raw)) return;
+  cal.refC[cal.step] = unit === 'F' ? fToC(raw) : raw;
+  calPersist();
+  calRenderLive();
+}
+
+function calRenderLive() {
+  if (cal.step > 2) return;
+  const step = cal.step;
+  let anyCapturable = false;
+  let anyDrifting   = false;
+
+  CAL_PROBES.forEach(probe => {
+    const st   = calStats(probe);
+    const card = document.getElementById(`cal-live-${probe}`);
+    const temp = document.getElementById(`cal-live-${probe}-temp`);
+    const res  = document.getElementById(`cal-live-${probe}-res`);
+    const pill = document.getElementById(`cal-live-${probe}-pill`);
+    const cap  = document.getElementById(`cal-live-${probe}-cap`);
+
+    card.classList.toggle('off', st.state === 'off');
+    pill.dataset.state = st.state;
+
+    if (st.state === 'off') {
+      temp.textContent = '--';
+      res.textContent  = 'No probe';
+      pill.textContent = 'unplugged · skipped';
+    } else if (st.state === 'waiting') {
+      temp.textContent = st.c != null ? fmtWithUnit(st.c) : '--';
+      res.textContent  = st.r != null ? Math.round(st.r).toLocaleString() + ' Ω' : '-- Ω';
+      pill.textContent = isLive() ? 'waiting for readings…' : 'not connected';
+    } else {
+      temp.textContent = fmtWithUnit(st.c);
+      res.textContent  = Math.round(st.r).toLocaleString() + ' Ω';
+      const dir = st.drift > 0.05 ? '▲' : st.drift < -0.05 ? '▼' : '';
+      pill.textContent = st.state === 'stable'
+        ? `stable · ±${fmt(st.spread / 2, 1)}°`
+        : `settling ${dir} ${fmt(st.spread, 1)}° over ${st.n}s`;
+      anyCapturable = true;
+      if (st.state === 'settling') anyDrifting = true;
+    }
+
+    const pt = cal.points[probe][step];
+    if (pt) {
+      cap.textContent = `Captured ${Math.round(pt.resistance).toLocaleString()} Ω @ ${fmtWithUnit(pt.tempC)}` +
+                        (pt.drifting ? ' · while drifting' : '');
+      cap.dataset.state = pt.drifting ? 'drifting' : 'ok';
+    } else {
+      cap.textContent = '';
+      cap.dataset.state = '';
+    }
+  });
+
+  const btn = document.getElementById('cal-capture-btn');
+  const connected = CAL_PROBES.filter(p => calStats(p).state !== 'off' && calStats(p).state !== 'waiting');
+  btn.disabled = !anyCapturable;
+  btn.classList.toggle('drifting', anyDrifting);
+  btn.textContent = connected.length === 2 ? (calStepCaptured(step) ? 'Re-capture both' : 'Capture both')
+                  : connected.length === 1 ? (calStepCaptured(step) ? `Re-capture ${connected[0]}` : `Capture ${connected[0]}`)
+                  : 'Capture';
+
+  // Sanity hint: is the reference plausible given what the current curve says?
+  const msg = document.getElementById('cal-msg');
+  const off = CAL_PROBES.map(p => calStats(p)).filter(s => s.c != null && s.state !== 'off')
+                        .map(s => Math.abs(s.c - cal.refC[step]));
+  const dupe = cal.refC.some((t, i) => i !== step && calStepCaptured(i) && Math.abs(t - cal.refC[step]) < 0.5);
+  if (dupe) {
+    msg.textContent = 'This reference temperature is already used by another bath. Each bath needs a different temperature.';
+    msg.dataset.state = 'error';
+    btn.disabled = true;
+  } else if (off.length && Math.min(...off) > 5) {
+    msg.textContent = `Probes currently read ${fmt(Math.min(...off), 0)}° away from the reference. Give them longer to settle, or check they are in the bath.`;
+    msg.dataset.state = 'warn';
+  } else {
+    msg.textContent = '';
+    msg.dataset.state = '';
   }
+
+  document.getElementById('cal-next-btn').disabled = !calStepCaptured(step);
 }
 
-function handleCalReading(data) {
-  // { type:'cal_reading', probe:0, point:0, resistance:336400 }
-  const probe = data.probe === 0 ? 'meat' : 'grill';
-  const index = data.point;
-  const tempC = pendingCalTemp[probe][index] ?? 0;
-  calState[probe][index] = { tempC, resistance: data.resistance };
-  updateCalPointUI(probe, index, data.resistance);
+function calCapture() {
+  const step = cal.step;
+  let captured = 0;
+  CAL_PROBES.forEach(probe => {
+    const st = calStats(probe);
+    if (st.state !== 'stable' && st.state !== 'settling') return;
+    cal.points[probe][step] = {
+      tempC:      cal.refC[step],
+      resistance: Math.round(st.meanR),
+      drifting:   st.state === 'settling',
+    };
+    captured++;
+  });
+  if (!captured) return;
+  cal.results = null;
+  calPersist();
+  calRender();
+}
+
+function calNext() {
+  if (cal.step >= 3) return;
+  cal.step++;
+  calPersist();
+  calRender();
+}
+
+function calBack() {
+  if (cal.step === 0) return;
+  cal.step--;
+  calPersist();
+  calRender();
+}
+
+function calStartOver() {
+  if (CAL_PROBES.some(p => cal.points[p].some(Boolean)) &&
+      !confirm('Discard the captured points and start again?')) return;
+  cal.step    = 0;
+  cal.refC    = CAL_STEPS.slice(0, 3).map(s => s.defaultC);
+  cal.points  = { meat: [null, null, null], grill: [null, null, null] };
+  cal.results = null;
+  calClearDraft();
+  calRender();
+}
+
+// ── Review ──
+
+function calProbeReview(probe) {
+  const pts = cal.points[probe];
+  const n   = pts.filter(Boolean).length;
+  if (n === 0)  return { probe, n, complete: false };
+  if (n < 3)    return { probe, n, complete: false };
+  const v = calValidate(pts);
+  return { probe, n, complete: true, ...v };
+}
+
+function calRenderReview() {
+  const body = document.getElementById('cal-review-body');
+  body.innerHTML = '';
+  let saveable = 0;
+
+  CAL_PROBES.forEach(probe => {
+    const rv   = calProbeReview(probe);
+    const sec  = document.createElement('div');
+    sec.className = 'cal-review-probe';
+    const prevInfo = cal.info[probe];
+    const prevPts  = prevInfo && Array.isArray(prevInfo.points) ? prevInfo.points : [];
+
+    let html = `<div class="cal-review-head"><span class="cal-live-name">${probe.toUpperCase()}</span>` +
+               `<span class="cal-review-prev">${calBadgeText(probe)}</span></div>`;
+
+    if (rv.n === 0) {
+      html += `<p class="cal-review-note">Not captured in any bath. Plug it in and go back to include it, or save the other probe alone.</p>`;
+    } else if (!rv.complete) {
+      const missing = CAL_STEPS.slice(0, 3).map((s, i) => cal.points[probe][i] ? null : s.title).filter(Boolean);
+      html += `<p class="cal-review-note warn">Only ${rv.n} of 3 baths captured. Missing: ${missing.join(', ')}. Go back to capture it, or this probe will be left as is.</p>`;
+    } else {
+      const bad = rv.ok ? -1 : (rv.point ?? -1);
+      html += `<div class="cal-table-wrap"><table class="cal-table"><thead><tr>` +
+              `<th>Bath</th><th>Reference</th><th>Measured</th><th>Fit</th><th>Previous</th></tr></thead><tbody>`;
+      cal.points[probe].forEach((pt, i) => {
+        const fit  = rv.ok ? shToC(rv.coeffs, pt.resistance) : NaN;
+        const prev = prevPts.find(p => Math.abs(p.temp_c - pt.tempC) < 2.5);
+        html += `<tr class="${i === bad ? 'bad' : ''}">` +
+                `<td>${CAL_STEPS[i].title}${pt.drifting ? ' <span class="cal-flag" title="captured while still settling">~</span>' : ''}</td>` +
+                `<td>${fmtWithUnit(pt.tempC)}</td>` +
+                `<td>${Math.round(pt.resistance).toLocaleString()} Ω</td>` +
+                `<td>${isFinite(fit) ? fmtWithUnit(fit) : '--'}</td>` +
+                `<td>${prev ? Math.round(prev.resistance).toLocaleString() + ' Ω' : '--'}</td></tr>`;
+      });
+      html += `</tbody></table></div>`;
+      if (rv.ok) {
+        const c = rv.coeffs;
+        html += `<div class="cal-coeffs"><span class="cal-coeff-item">A <span>${c.A.toExponential(4)}</span></span>` +
+                `<span class="cal-coeff-item">B <span>${c.B.toExponential(4)}</span></span>` +
+                `<span class="cal-coeff-item">C <span>${c.C.toExponential(4)}</span></span></div>`;
+        html += `<p class="cal-review-note" id="cal-preview-${probe}"></p>`;
+        saveable++;
+      } else {
+        html += `<p class="cal-review-note error">${CAL_REASONS[rv.reason] || rv.reason}</p>`;
+      }
+    }
+
+    const res = cal.results && cal.results[probe];
+    if (res) {
+      const text = res.saved   ? 'Saved to SD ✓'
+                 : res.applied ? CAL_REASONS.sd_write_failed
+                 : `Rejected by device: ${CAL_REASONS[res.reason] || res.reason}`;
+      html += `<p class="cal-review-note ${res.saved ? 'ok' : 'error'}">${text}</p>`;
+    }
+
+    sec.innerHTML = html;
+    body.appendChild(sec);
+  });
+
+  const btn = document.getElementById('cal-save-btn');
+  const done = cal.results && Object.values(cal.results).some(r => r.saved);
+  btn.disabled = !saveable || cal.saving || !isLive() || done;
+  btn.textContent = done ? 'Saved ✓' : cal.saving ? 'Saving…' : saveable === 2 ? 'Save both' : 'Save';
+  const msg = document.getElementById('cal-save-msg');
+  msg.textContent = !isLive() ? 'Not connected to the device. Reconnect to save.' : '';
+  calRenderReviewLive();
+}
+
+function calRenderReviewLive() {
+  CAL_PROBES.forEach(probe => {
+    const el = document.getElementById(`cal-preview-${probe}`);
+    if (!el) return;
+    const rv = calProbeReview(probe);
+    const st = calStats(probe);
+    if (!rv.ok || st.r == null) { el.textContent = ''; return; }
+    const now = shToC(rv.coeffs, st.r);
+    el.textContent = `Right now this probe would read ${fmtWithUnit(now)} (currently ${fmtWithUnit(st.c)}).`;
+  });
+}
+
+// ── Save ──
+
+function calSave() {
+  if (!isLive() || !wsSocket || cal.saving) return;
+  const probes = CAL_PROBES.map((p, i) => ({ p, i, rv: calProbeReview(p) }))
+                           .filter(x => x.rv.ok)
+                           .map(x => ({
+                             probe:  x.i,
+                             points: cal.points[x.p].map(pt => ({ temp_c: pt.tempC, resistance: pt.resistance })),
+                           }));
+  if (!probes.length) return;
+  cal.saving  = true;
+  cal.results = null;
+  calRenderReview();
+  wsSocket.send(JSON.stringify({ type: 'cal_save', timestamp: new Date().toISOString(), probes }));
 }
 
 function handleCalSaved(data) {
-  const probe = data.probe === 0 ? 'meat' : 'grill';
-  const btn   = document.getElementById(`cal-${probe}-calc`);
-  btn.textContent = data.saved ? 'Saved to SD ✓' : 'Save failed ✗';
-  setTimeout(() => { btn.textContent = 'Calculate & Save'; }, 2500);
+  cal.saving  = false;
+  cal.results = {};
+  (data.results || []).forEach(r => {
+    const probe = CAL_PROBES[r.probe];
+    if (!probe) return;
+    cal.results[probe] = r;
+    if (r.applied) {
+      cal.info[probe] = {
+        source:     r.saved ? 'sd' : 'ram',
+        calibrated: data.calibrated || new Date().toISOString(),
+        points:     cal.points[probe].map(pt => ({ temp_c: pt.tempC, resistance: pt.resistance })),
+      };
+    }
+  });
+  if (Object.values(cal.results).some(r => r.saved)) calClearDraft();
+  calRenderBadges();
+  if (cal.open) calRender();
 }
 
-function calculateCoeffs(probe) {
-  const points = calState[probe];
-  if (!points.every(p => p !== null)) return;
+// ── Status badges + persisted draft ──
 
-  const { A, B, C } = calcSHCoeffs(points);
-
-  document.getElementById(`cal-${probe}-A`).textContent = A.toExponential(4);
-  document.getElementById(`cal-${probe}-B`).textContent = B.toExponential(4);
-  document.getElementById(`cal-${probe}-C`).textContent = C.toExponential(4);
-  document.getElementById(`cal-${probe}-result`).classList.remove('hidden');
-
-  if (isLive() && wsSocket) {
-    wsSocket.send(JSON.stringify({
-      type:      'cal_save',
-      probe:     probe === 'meat' ? 0 : 1,
-      A, B, C,
-      points:    points.map(p => ({ temp_c: p.tempC, resistance: p.resistance })),
-      timestamp: new Date().toISOString(),
-    }));
-  }
+function calSetInfo(calibration) {
+  CAL_PROBES.forEach((probe, i) => {
+    const c = calibration[String(i)];
+    cal.info[probe] = c ? { source: c.source, calibrated: c.calibrated, points: c.points || [] } : null;
+  });
+  calRenderBadges();
 }
+
+function calBadgeText(probe) {
+  const info = cal.info[probe];
+  if (!info || info.source === 'default' || !info.calibrated) return 'defaults';
+  const d = new Date(info.calibrated);
+  const when = isNaN(d) ? 'calibrated' : d.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
+  return `✓ ${when}`;
+}
+
+function calRenderBadges() {
+  const el = document.getElementById('cal-badges');
+  if (!el) return;
+  const captured = [0, 1, 2].filter(calStepCaptured).length;
+  const parts = CAL_PROBES.map(p => `${p[0].toUpperCase() + p.slice(1)} ${calBadgeText(p)}`);
+  el.textContent = captured && !(cal.results && Object.values(cal.results).some(r => r.saved))
+    ? `In progress · ${captured} of 3 baths captured`
+    : parts.join(' · ');
+}
+
+function calPersist() {
+  try {
+    localStorage.setItem(CAL_DRAFT_KEY, JSON.stringify({ step: cal.step, refC: cal.refC, points: cal.points }));
+  } catch {}
+  calRenderBadges();
+}
+
+function calClearDraft() {
+  try { localStorage.removeItem(CAL_DRAFT_KEY); } catch {}
+}
+
+function calRestore() {
+  let d = null;
+  try { d = JSON.parse(localStorage.getItem(CAL_DRAFT_KEY) || 'null'); } catch {}
+  if (!d || !d.points || !Array.isArray(d.refC)) return;
+  const valid = arr => Array.isArray(arr) && arr.length === 3;
+  if (!valid(d.refC) || !valid(d.points.meat) || !valid(d.points.grill)) return;
+  cal.refC   = d.refC.map((t, i) => isFinite(t) ? t : CAL_STEPS[i].defaultC);
+  cal.points = { meat: d.points.meat.map(p => p || null), grill: d.points.grill.map(p => p || null) };
+  cal.step   = Math.min(3, Math.max(0, d.step | 0));
+  calRenderBadges();
+}
+
+document.addEventListener('DOMContentLoaded', calRestore);
 
 // ── WiFi setup ────────────────────────────────────────────────────────────────
 

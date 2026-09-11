@@ -49,15 +49,6 @@ misclassifies grill temperature as always in-range.
 
 ---
 
-### Calibration accepts duplicate temperatures
-**File:** `device/data/app.js` (`recordPoint`)  
-Steinhart-Hart solving requires three distinct temperatures. Submitting the same temperature
-twice causes a divide-by-zero in `calcSHCoeffs()`.  
-**Fix:** Before recording, verify the new temperature differs by > 0.5 °C from all already-recorded
-points; alert and return if not.
-
----
-
 ### History duration incorrect for in-progress cooks
 **File:** `device/data/roadmap.js` (`handleCookList`)  
 Active cooks have no `stopped_at`; duration calculation falls back to `c.duration_s` which may

@@ -122,14 +122,14 @@ The `★` button in the detail modal header is small and borderless. Making it m
 ### No validation that grill low < grill high
 The two grill range inputs accept any number independently. If `grill-low` is set higher than `grill-high` the range indicator will invert silently. A validation check with an inline error message would prevent this.
 
-### Calibration status is not persisted visually
-After a successful calibration the user sees the coefficients briefly, but on the next page load there is no indicator that the probe has been calibrated. A small "Calibrated ✓ [date]" badge per probe would give confidence that calibration is in effect.
+### ~~Calibration status is not persisted visually~~ — done
+The calibration wizard's collapsed header now shows "Meat ✓ [date] · Grill defaults", fed by the `calibration` block of the `config` message. See `CALIBRATION-PLAN.md`.
 
-### No validation that calibration temperatures are monotonically increasing
-The three calibration reference points (typically 0 °C, 25 °C, 100 °C) are entered freely. If the user enters them in the wrong order or with duplicates, the Steinhart-Hart calculation will produce bad coefficients silently. Validating the ordering before allowing "Calculate & Save" would prevent corrupted calibration data.
+### ~~No validation that calibration temperatures are monotonically increasing~~ — done
+Distinct-temperature and monotonic-resistance checks now run both in the wizard (before Save is enabled) and in the firmware (`calibrateFromPoints()`), and rejections name the offending point.
 
-### Calibration collapse is not remembered
-Every time the user opens Settings the calibration section is collapsed. If a user is actively going through the calibration workflow they have to re-expand it each visit. Persisting the open/closed state in `localStorage` would reduce clicks.
+### ~~Calibration collapse is not remembered~~ — superseded
+The wizard persists its whole state (step, reference temperatures, captured points) in `localStorage`, so a reload resumes the calibration rather than just re-expanding the section.
 
 ### Favourites have no edit-in-place
 Saved favourites can only be loaded or deleted. There is no way to rename a favourite or adjust its target temperatures without deleting and re-saving it. An edit flow (tap name to rename, tap targets to adjust) would make favourites more useful.

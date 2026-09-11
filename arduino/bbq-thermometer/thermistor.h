@@ -24,6 +24,19 @@ SHCoeffs probeCoeffs[2] = {
   { PROBE1_SH_A, PROBE1_SH_B, PROBE1_SH_C },
 };
 
+// Where the coefficients came from, and the reference points behind them.
+// Filled by loadCalibration() on boot and by a successful cal_save; reported
+// in the `config` message so the UI can show "Calibrated ✓ <date>" and let the
+// user compare a new capture against the previous one. `calibrated[0] == 0`
+// means the probe is running on the config.h defaults.
+struct CalInfo {
+  char  calibrated[25];   // ISO-8601 timestamp from the browser, or ""
+  float t[3];             // reference temperatures, °C
+  float r[3];             // measured resistances, Ω
+};
+
+CalInfo probeCal[2] = {};
+
 // ── ADC → resistance ──────────────────────────────────────────────────────────
 //
 // ADS1115 voltage divider topology:
@@ -132,4 +145,80 @@ bool calcSHCoeffs(float t1c, float r1,
   out->B = B;
   out->C = C;
   return true;
+}
+
+// ── Calibration: validate three reference points and derive coefficients ─────
+//
+// The browser only ever sends raw (temp, resistance) points; the coefficients
+// are computed HERE so a buggy or malicious client can never install NaN maths
+// that bricks the readings until recalibration. Every rejection names the
+// offending point so the UI can highlight it instead of showing a generic
+// error.
+
+enum CalError : uint8_t {
+  CAL_OK = 0,
+  CAL_BAD_INPUT,        // non-finite or non-positive resistance / temperature
+  CAL_TEMPS_TOO_CLOSE,  // two reference temperatures within 0.5 °C
+  CAL_NOT_MONOTONIC,    // resistance doesn't fall as temperature rises (NTC)
+  CAL_DEGENERATE,       // maths blew up (duplicate resistances etc.)
+  CAL_ROUNDTRIP,        // a point converts back more than ±3 °C from its reference
+};
+
+static const char* calErrorReason(CalError e) {
+  switch (e) {
+    case CAL_OK:              return "ok";
+    case CAL_BAD_INPUT:       return "bad_input";
+    case CAL_TEMPS_TOO_CLOSE: return "temps_too_close";
+    case CAL_NOT_MONOTONIC:   return "not_monotonic";
+    case CAL_DEGENERATE:      return "degenerate";
+    case CAL_ROUNDTRIP:       return "roundtrip";
+  }
+  return "unknown";
+}
+
+// On failure *badPoint is the index (0-2) of the point to blame, or 255 when
+// the failure isn't attributable to one point.
+CalError calibrateFromPoints(const float t[3], const float r[3],
+                             SHCoeffs* out, uint8_t* badPoint) {
+  *badPoint = 255;
+
+  for (uint8_t i = 0; i < 3; i++) {
+    if (!isfinite(t[i]) || !isfinite(r[i]) || r[i] <= 0.0f ||
+        t[i] < -50.0f || t[i] > 350.0f) {
+      *badPoint = i;
+      return CAL_BAD_INPUT;
+    }
+  }
+
+  // Order the points by temperature so the monotonic check reads naturally.
+  uint8_t idx[3] = { 0, 1, 2 };
+  for (uint8_t i = 0; i < 2; i++)
+    for (uint8_t j = i + 1; j < 3; j++)
+      if (t[idx[j]] < t[idx[i]]) { uint8_t s = idx[i]; idx[i] = idx[j]; idx[j] = s; }
+
+  for (uint8_t k = 0; k < 2; k++) {
+    uint8_t lo = idx[k], hi = idx[k + 1];
+    if (t[hi] - t[lo] < 0.5f) { *badPoint = hi; return CAL_TEMPS_TOO_CLOSE; }
+    // NTC: warmer must mean lower resistance. If not, one probe never went in
+    // the bath, or two baths were mixed up.
+    if (r[hi] >= r[lo])       { *badPoint = hi; return CAL_NOT_MONOTONIC; }
+  }
+
+  SHCoeffs c;
+  if (!calcSHCoeffs(t[0], r[0], t[1], r[1], t[2], r[2], &c)) return CAL_DEGENERATE;
+
+  // Every reference point must convert back to within ±3 °C of what the user
+  // entered. A 3-point exact fit normally reproduces them to float precision;
+  // a big residual means a wildly wrong point slipped past the checks above.
+  for (uint8_t i = 0; i < 3; i++) {
+    float L    = log(r[i]);
+    float invT = c.A + c.B * L + c.C * L * L * L;
+    if (invT <= 0.0f || fabsf((1.0f / invT - 273.15f) - t[i]) > 3.0f) {
+      *badPoint = i;
+      return CAL_ROUNDTRIP;
+    }
+  }
+
+  *out = c;
+  return CAL_OK;
 }

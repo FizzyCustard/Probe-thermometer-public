@@ -6,6 +6,7 @@
 #include "logger.h"
 #include "cook_session.h"
 #include "wifi_manager.h"
+#include "snapshot.h"
 
 extern AsyncWebSocket ws;
 extern float meatTarget;
@@ -39,10 +40,21 @@ static void sendCookData(AsyncWebSocketClient* client, const char* file);
 // `pendingKind` is volatile and written LAST when enqueueing: the callback
 // runs from the async context, so loop() must never observe a kind with a
 // half-filled payload.
-enum PendingKind : uint8_t { PENDING_NONE = 0, PENDING_COOK_LIST, PENDING_COOK_DATA, PENDING_WIFI_SCAN };
+enum PendingKind : uint8_t { PENDING_NONE = 0, PENDING_COOK_LIST, PENDING_COOK_DATA, PENDING_WIFI_SCAN, PENDING_CAL_SAVE };
 static volatile uint8_t pendingKind = PENDING_NONE;
 static uint32_t pendingClientId = 0;
 static char     pendingFile[64] = "";
+
+// Payload for PENDING_CAL_SAVE: raw reference points for either or both
+// probes. The callback only parses and copies; the maths, validation, and the
+// SD write all happen in wsTick() (see applyPendingCalibration).
+struct PendingCal {
+  bool  has[2];
+  float t[2][3];
+  float r[2][3];
+  char  timestamp[25];
+};
+static PendingCal pendingCal;
 
 // Scheduled restart (set instead of calling delay()+restart() inside a
 // callback — the async context must never block).
@@ -233,25 +245,6 @@ void onWsMessage(AsyncWebSocketClient* client, const char* data, size_t len) {
     return;
   }
 
-  // ── Calibration: read live resistance on a probe channel ─────────────────
-  if (strcmp(type, "cal_read") == 0) {
-    uint8_t probe = doc["probe"].as<uint8_t>();
-    uint8_t point = doc["point"] | 0;
-    if (probe > 1) return;
-
-    float r = readResistance(probe);
-    JsonDocument resp;
-    resp["type"]       = "cal_reading";
-    resp["probe"]      = probe;
-    resp["point"]      = point;
-    resp["resistance"] = r;
-    String out;
-    serializeJson(resp, out);
-    client->text(out);
-    Serial.printf("Cal read probe %d point %d: %.0f Ω\n", probe, point, r);
-    return;
-  }
-
   // ── WiFi: scan for nearby networks (deferred — a scan blocks for seconds) ─
   if (strcmp(type, "wifi_scan") == 0) {
     pendingClientId = client->id();
@@ -303,53 +296,53 @@ void onWsMessage(AsyncWebSocketClient* client, const char* data, size_t len) {
     return;
   }
 
-  // ── Calibration: compute, apply and save coefficients from raw points ────
+  // ── Calibration: save reference points for one or both probes (deferred) ─
   //
-  // The browser sends the three (temp, resistance) reference points; the
-  // coefficients are computed HERE with calcSHCoeffs() and sanity-checked, so
-  // a buggy or malicious client can never install NaN maths that bricks the
-  // readings until recalibration.
+  //   { "type": "cal_save", "timestamp": "...",
+  //     "probes": [ { "probe": 0, "points": [ {"temp_c":0,"resistance":336210}, ×3 ] },
+  //                 { "probe": 1, "points": [ ... ] } ] }
+  //
+  // Only the raw points are accepted — the coefficients are derived and
+  // sanity-checked on the device (calibrateFromPoints), so a buggy or
+  // malicious client can never install NaN maths that bricks the readings.
+  // The SD write blocks, so the work is queued for wsTick(); the reply
+  // (`cal_saved`, one result per probe) is sent from there.
   if (strcmp(type, "cal_save") == 0) {
-    uint8_t probe = doc["probe"].as<uint8_t>();
-    if (probe > 1) return;
+    PendingCal pc = {};
+    JsonArray probes = doc["probes"].as<JsonArray>();
+    if (!probes) return;
 
-    float t[3], r[3];
-    bool ok = doc["points"].is<JsonArray>() && doc["points"].size() >= 3;
-    for (uint8_t i = 0; ok && i < 3; i++) {
-      if (!doc["points"][i]["temp_c"].is<float>() ||
-          !doc["points"][i]["resistance"].is<float>()) { ok = false; break; }
-      t[i] = doc["points"][i]["temp_c"].as<float>();
-      r[i] = doc["points"][i]["resistance"].as<float>();
+    for (JsonObject p : probes) {
+      uint8_t idx = p["probe"] | 255;
+      if (idx > 1) continue;
+      JsonArray pts = p["points"].as<JsonArray>();
+      if (!pts || pts.size() < 3) continue;
+      bool ok = true;
+      for (uint8_t k = 0; k < 3; k++) {
+        if (!pts[k]["temp_c"].is<float>() || !pts[k]["resistance"].is<float>()) { ok = false; break; }
+        pc.t[idx][k] = pts[k]["temp_c"].as<float>();
+        pc.r[idx][k] = pts[k]["resistance"].as<float>();
+      }
+      pc.has[idx] = ok;
+    }
+    if (!pc.has[0] && !pc.has[1]) return;
+
+    // Prefer the device clock; the browser's stamp is only a fallback for AP
+    // mode, and even then it's character-whitelisted before it's stored.
+    if (!isAPMode() && ntpReady()) {
+      strlcpy(pc.timestamp, getTimestamp().c_str(), sizeof(pc.timestamp));
+    } else {
+      const char* bts = doc["timestamp"] | "";
+      bool ok = strlen(bts) >= 19 && strlen(bts) < sizeof(pc.timestamp);
+      for (const char* s = bts; ok && *s; s++) {
+        if (!((*s >= '0' && *s <= '9') || *s == 'T' || *s == ':' || *s == '-' || *s == '.' || *s == 'Z')) ok = false;
+      }
+      strlcpy(pc.timestamp, ok ? bts : "unknown", sizeof(pc.timestamp));
     }
 
-    SHCoeffs c = { 0, 0, 0 };
-    ok = ok && calcSHCoeffs(t[0], r[0], t[1], r[1], t[2], r[2], &c);
-
-    // Round-trip sanity check: the middle reference point must convert back
-    // to within ±3 °C of what the user entered.
-    if (ok) {
-      float L    = log(r[1]);
-      float invT = c.A + c.B * L + c.C * L * L * L;
-      ok = invT > 0.0f && fabsf((1.0f / invT - 273.15f) - t[1]) <= 3.0f;
-    }
-
-    bool saved = false;
-    if (ok) {
-      probeCoeffs[probe] = c;
-      const char* ts = doc["timestamp"] | "unknown";
-      saved = saveCalibration(probe, c, t[0], r[0], t[1], r[1], t[2], r[2], ts);
-    }
-
-    JsonDocument resp;
-    resp["type"]  = "cal_saved";
-    resp["probe"] = probe;
-    resp["saved"] = saved;
-    if (!ok) resp["reason"] = "bad_points";
-    String out;
-    serializeJson(resp, out);
-    client->text(out);
-    Serial.printf("Calibration %s for probe %d: A=%.4e B=%.4e C=%.4e\n",
-                  saved ? "saved" : "FAILED", probe, c.A, c.B, c.C);
+    pendingCal      = pc;
+    pendingClientId = client->id();
+    pendingKind     = PENDING_CAL_SAVE;   // written last — see queue comment
     return;
   }
 }
@@ -564,10 +557,70 @@ static void sendWifiScan(AsyncWebSocketClient* client) {
   client->text(out);
 }
 
+// Derive, validate, apply and persist the queued calibration points, then
+// reply with one result per probe:
+//
+//   { "type": "cal_saved", "calibrated": "<ts>",
+//     "results": [ { "probe": 0, "saved": true },
+//                  { "probe": 1, "saved": false, "reason": "not_monotonic", "point": 2 } ] }
+//
+// A probe whose points fail validation is left untouched. A probe that
+// validates is applied to probeCoeffs immediately (readings change on the next
+// tick) even if the SD write then fails — that case reports
+// `applied: true, saved: false, reason: "sd_write_failed"` so the UI can say
+// "in use until reboot" rather than pretending nothing happened.
+static void applyPendingCalibration(AsyncWebSocketClient* client) {
+  const PendingCal& pc = pendingCal;
+  bool anyApplied = false;
+  CalError err[2]  = { CAL_OK, CAL_OK };
+  uint8_t  badPt[2] = { 255, 255 };
+
+  for (uint8_t i = 0; i < 2; i++) {
+    if (!pc.has[i]) continue;
+    SHCoeffs c;
+    err[i] = calibrateFromPoints(pc.t[i], pc.r[i], &c, &badPt[i]);
+    if (err[i] != CAL_OK) {
+      Serial.printf("Calibration REJECTED for probe %u: %s (point %u)\n",
+                    i, calErrorReason(err[i]), badPt[i]);
+      continue;
+    }
+    probeCoeffs[i] = c;
+    strlcpy(probeCal[i].calibrated, pc.timestamp, sizeof(probeCal[i].calibrated));
+    for (uint8_t k = 0; k < 3; k++) { probeCal[i].t[k] = pc.t[i][k]; probeCal[i].r[k] = pc.r[i][k]; }
+    anyApplied = true;
+    Serial.printf("Calibration applied for probe %u: A=%.4e B=%.4e C=%.4e\n", i, c.A, c.B, c.C);
+  }
+
+  bool fileOk = anyApplied && saveCalibrationFile();
+
+  JsonDocument resp;
+  resp["type"]       = "cal_saved";
+  resp["calibrated"] = pc.timestamp;
+  JsonArray results  = resp["results"].to<JsonArray>();
+  for (uint8_t i = 0; i < 2; i++) {
+    if (!pc.has[i]) continue;
+    JsonObject r = results.add<JsonObject>();
+    r["probe"] = i;
+    if (err[i] != CAL_OK) {
+      r["applied"] = false;
+      r["saved"]   = false;
+      r["reason"]  = calErrorReason(err[i]);
+      if (badPt[i] != 255) r["point"] = badPt[i];
+    } else {
+      r["applied"] = true;
+      r["saved"]   = fileOk;
+      if (!fileOk) r["reason"] = "sd_write_failed";
+    }
+  }
+  String out;
+  serializeJson(resp, out);
+  client->text(out);
+}
+
 // Called from loop(): services one deferred request, delivers WiFi-test
 // results, and performs any scheduled restart.
 void wsTick() {
-  // 1. Deferred client request (cook list / cook data / wifi scan)
+  // 1. Deferred client request (cook list / cook data / wifi scan / cal save)
   if (pendingKind != PENDING_NONE) {
     uint8_t kind = pendingKind;
     pendingKind = PENDING_NONE;               // clear before the (slow) work
@@ -577,6 +630,7 @@ void wsTick() {
       if      (kind == PENDING_COOK_LIST) sendCookList(client);
       else if (kind == PENDING_COOK_DATA) sendCookData(client, pendingFile);
       else if (kind == PENDING_WIFI_SCAN) sendWifiScan(client);
+      else if (kind == PENDING_CAL_SAVE)  applyPendingCalibration(client);
     }
   }
 
@@ -659,6 +713,28 @@ static void sendConfig(AsyncWebSocketClient* client) {
     doc["cook_active"] = false;
   }
 
+  // Per-probe calibration state, so the UI can show "Calibrated ✓ <date>" and
+  // offer the previous reference points for comparison during a re-calibration.
+  JsonObject cal = doc["calibration"].to<JsonObject>();
+  for (uint8_t i = 0; i < 2; i++) {
+    char key[2] = { (char)('0' + i), 0 };
+    JsonObject p = cal[key].to<JsonObject>();
+    bool calibrated = probeCal[i].calibrated[0] != 0;
+    p["source"] = calibrated ? "sd" : "default";
+    if (calibrated) {
+      p["calibrated"] = probeCal[i].calibrated;
+      JsonArray pts = p["points"].to<JsonArray>();
+      for (uint8_t k = 0; k < 3; k++) {
+        if (!isfinite(probeCal[i].t[k]) || !isfinite(probeCal[i].r[k])) continue;
+        JsonObject pt = pts.add<JsonObject>();
+        pt["temp_c"]     = probeCal[i].t[k];
+        pt["resistance"] = probeCal[i].r[k];
+      }
+    } else {
+      p["calibrated"] = nullptr;
+    }
+  }
+
   if (isAPMode()) doc["ap_mode"] = true;
 
   String out;
@@ -703,7 +779,8 @@ void wsBegin(AsyncWebServer* server) {
 // Pushed every 1s to all connected clients. Includes cook state when active,
 // plus SD/heap health so the UI can warn when nothing is being recorded.
 
-void wsBroadcast(float meatC, float grillC, String timestamp) {
+void wsBroadcast(float meatC, float grillC, float meatR, float grillR,
+                 String timestamp) {
   if (ws.count() == 0) return;
 
   // Back-pressure: if any client's TCP queue is congested (phone locked or
@@ -711,35 +788,10 @@ void wsBroadcast(float meatC, float grillC, String timestamp) {
   // ever-shrinking heap until the device resets.
   if (!ws.availableForWriteAll()) return;
 
-  // A cook carries its own targets, which may differ from the persisted
-  // globals. The tick reports the target *in force right now* so external
-  // monitors don't alarm against a stale global; the cook's values are also
-  // echoed explicitly below for clients that want to tell the two apart.
-  const bool ck = activeCook.active;
-
+  // Payload is built by the shared snapshot builder so this tick and
+  // GET /api/status can never report different values (see snapshot.h).
   JsonDocument doc;
-  doc["ts"]          = timestamp;
-  doc["meat"]["c"]   = meatC;
-  doc["grill"]["c"]  = grillC;
-  doc["meat_target"] = ck ? activeCook.meatTargetC : meatTarget;
-  doc["grill_low"]   = ck ? activeCook.grillLowC   : grillLow;
-  doc["grill_high"]  = ck ? activeCook.grillHighC  : grillHigh;
-  doc["sd"]          = sdOk;
-  doc["heap"]        = ESP.getFreeHeap();
-
-  if (ck) {
-    doc["cook_active"]      = true;
-    doc["cook_name"]        = activeCook.name;
-    doc["cook_elapsed_s"]   = cookElapsedSeconds();
-    doc["cook_meat_target"] = activeCook.meatTargetC;
-    doc["cook_grill_low"]   = activeCook.grillLowC;
-    doc["cook_grill_high"]  = activeCook.grillHighC;
-  } else {
-    doc["cook_active"] = false;
-  }
-
-  if (isAPMode()) doc["ap_mode"] = true;
-  else doc["rssi"] = WiFi.RSSI();
+  buildSnapshot(doc, meatC, grillC, meatR, grillR, timestamp);
 
   String out;
   serializeJson(doc, out);

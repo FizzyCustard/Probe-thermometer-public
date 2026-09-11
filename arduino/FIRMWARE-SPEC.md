@@ -197,13 +197,17 @@ file exists it overwrites `probeCoeffs[]` with the saved values.
 ```json
 {
   "ts": "2025-07-14T14:32:05",
-  "meat":  { "c": 67.4 },
-  "grill": { "c": 182.3 },
+  "meat":  { "c": 67.4,  "r": 9210 },
+  "grill": { "c": 182.3, "r": 612 },
   "meat_target": 74.0,
   "grill_low":   160.0,
   "grill_high":  200.0
 }
 ```
+
+`r` is the median-of-3 resistance behind `c`, in whole ohms (`null` when the
+probe is disconnected). It is what the calibration wizard watches for
+settling, so there is no separate "read resistance" request.
 
 ### Inbound: settings update
 
@@ -211,60 +215,92 @@ file exists it overwrites `probeCoeffs[]` with the saved values.
 { "type": "settings", "meat_target": 80.0, "grill_low": 150.0, "grill_high": 210.0 }
 ```
 
-### Inbound: calibration — read resistance
+### Inbound: calibration — save reference points
 
-Browser requests a live resistance reading on a probe channel:
-
-```json
-{ "type": "cal_read", "probe": 0 }
-```
-
-ESP8266 responds:
-
-```json
-{ "type": "cal_reading", "probe": 0, "resistance": 336400.0 }
-```
-
-### Inbound: calibration — save coefficients
-
-After all 3 points are recorded the browser calculates A/B/C and sends:
+The browser sends raw (temperature, resistance) reference points for either
+or both probes in one message. It never sends coefficients: they are derived
+and validated on the device.
 
 ```json
 {
   "type": "cal_save",
-  "probe": 0,
-  "A": 4.475e-4, "B": 2.523e-4, "C": 1.701e-9,
-  "points": [
-    {"temp_c": 0.0,   "resistance": 336400.0},
-    {"temp_c": 25.0,  "resistance": 100000.0},
-    {"temp_c": 100.0, "resistance": 6960.0}
-  ],
-  "timestamp": "2025-07-14T14:30:00"
+  "timestamp": "2026-09-11T14:30:00Z",
+  "probes": [
+    { "probe": 0, "points": [
+        {"temp_c": 0.0,   "resistance": 336210},
+        {"temp_c": 25.0,  "resistance": 100000},
+        {"temp_c": 100.0, "resistance": 6960} ] },
+    { "probe": 1, "points": [ "..." ] }
+  ]
 }
 ```
 
-ESP8266 applies the coefficients immediately, saves to SD, responds:
+The handler only parses and copies the points into `pendingCal`; the work
+runs from `wsTick()` in `loop()` because the SD write blocks. There
+`calibrateFromPoints()` (thermistor.h) checks every probe's points:
+
+| Reason | Meaning |
+|---|---|
+| `bad_input` | non-finite / non-positive resistance, or temperature outside −50…350 °C |
+| `temps_too_close` | two reference temperatures within 0.5 °C |
+| `not_monotonic` | resistance does not fall as temperature rises — a probe was not in the bath |
+| `degenerate` | the maths produced a non-finite coefficient |
+| `roundtrip` | a point converts back more than ±3 °C from its reference |
+
+A probe that passes is applied to `probeCoeffs[]` at once and recorded in
+`probeCal[]`; then `saveCalibrationFile()` rewrites `/calibration.json` from
+RAM in a single write. The reply carries one result per probe:
 
 ```json
-{ "type": "cal_saved", "probe": 0, "saved": true }
+{ "type": "cal_saved", "calibrated": "2026-09-11T14:30:00",
+  "results": [
+    { "probe": 0, "applied": true,  "saved": true },
+    { "probe": 1, "applied": false, "saved": false, "reason": "not_monotonic", "point": 1 }
+  ] }
+```
+
+`applied: true, saved: false, reason: "sd_write_failed"` means the new curve
+is in use until reboot but could not be persisted. `timestamp` is replaced by
+the device clock when NTP is available; in AP mode the browser's value is
+character-whitelisted before it is stored.
+
+### Config: calibration status
+
+`config` (sent on connect / `request_config`) includes:
+
+```json
+"calibration": {
+  "0": { "source": "sd", "calibrated": "2026-09-11T14:30:00",
+         "points": [ {"temp_c": 0, "resistance": 336210}, "..." ] },
+  "1": { "source": "default", "calibrated": null }
+}
 ```
 
 ---
 
 ## Calibration Workflow
 
-1. Open the web UI, expand the **Probe Calibration** section.
-2. For each probe, place it in three reference media at known temperatures.
-   Recommended points: **0°C** (ice water), **25°C** (room temp with a
-   reference thermometer), **100°C** (boiling water at sea level).
-3. Enter the known temperature, click **Record** — the browser sends a
-   `cal_read` message and displays the measured resistance.
-4. Once all 3 points are recorded, click **Calculate & Save**.
-   - Browser computes A/B/C using the Steinhart-Hart algorithm.
-   - Sends a `cal_save` message to the firmware.
-   - Firmware saves `/calibration.json` to SD and immediately starts
-     using the new coefficients.
-5. The calculated A/B/C values are shown on screen for reference.
+The web UI runs a four-step wizard that calibrates **both probes at once**,
+one bath at a time. `device/data/app.js`, "Calibration wizard" section.
+
+1. **Ice bath (0 °C)**, **room temperature (~25 °C, against a reference
+   thermometer)**, **boiling water (100 °C at sea level)**. On each step both
+   probes go in the same bath; the wizard shows each probe's live °C and Ω
+   from the tick, and a settling/stable pill computed from the spread of the
+   last 8 readings. One shared reference-temperature input per bath.
+2. **Capture** stores the *mean* resistance of the buffered readings for every
+   connected probe, tagged with the reference temperature. Capturing while
+   still settling is allowed but flagged. An unplugged probe is skipped.
+3. **Review & save** shows each probe's three points, the coefficients they
+   yield, the round-trip fit per point, the previous calibration's resistances
+   for comparison, and a live "would read X right now" preview. **Save** sends
+   one `cal_save` for every probe with three valid points.
+4. Progress (step, reference temperatures, captured points) is kept in
+   `localStorage` under `bbq_cal_draft`, so a reload mid-calibration resumes
+   where it left off. The draft is cleared on a successful save.
+
+The collapsed header shows per-probe status from the `config` message:
+"Meat ✓ 11 Sep 2026 · Grill defaults".
 
 ---
 

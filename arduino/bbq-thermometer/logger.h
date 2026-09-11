@@ -273,39 +273,43 @@ uint8_t loadFavourites(Favourite* list, uint8_t maxCount) {
 
 // ── Calibration JSON ──────────────────────────────────────────────────────────
 
-bool saveCalibration(uint8_t probeIndex,
-                     const SHCoeffs& coeffs,
-                     float t1c, float r1,
-                     float t2c, float r2,
-                     float t3c, float r3,
-                     const char* timestamp) {
+// The file is written from RAM (probeCoeffs + probeCal) in one go, so saving
+// both probes costs a single SD write. Probes still on config.h defaults
+// (probeCal[i].calibrated empty) are left out of the file, so a later boot
+// falls back to the defaults for them rather than persisting the defaults as
+// if they were a calibration.
+//
+// SD writes block: only call from loop() (wsTick's deferred queue), never
+// from the async WebSocket callback.
+bool saveCalibrationFile() {
   if (!sdOk) return false;
 
   JsonDocument doc;
-  if (SD.exists(CAL_FILE)) {
-    File f = SD.open(CAL_FILE, FILE_READ);
-    if (f) { deserializeJson(doc, f); f.close(); }
+  for (uint8_t i = 0; i < 2; i++) {
+    if (probeCal[i].calibrated[0] == 0) continue;
+
+    char key[12];
+    snprintf(key, sizeof(key), "probe%u", i);
+    JsonObject probe = doc[key].to<JsonObject>();
+    probe["A"] = probeCoeffs[i].A;
+    probe["B"] = probeCoeffs[i].B;
+    probe["C"] = probeCoeffs[i].C;
+    probe["calibrated"] = probeCal[i].calibrated;
+
+    JsonArray points = probe["points"].to<JsonArray>();
+    for (uint8_t k = 0; k < 3; k++) {
+      JsonObject p = points.add<JsonObject>();
+      p["temp_c"]     = probeCal[i].t[k];
+      p["resistance"] = probeCal[i].r[k];
+    }
   }
-
-  char key[12];
-  snprintf(key, sizeof(key), "probe%u", probeIndex);
-  JsonObject probe = doc[key].to<JsonObject>();
-  probe["A"] = coeffs.A;
-  probe["B"] = coeffs.B;
-  probe["C"] = coeffs.C;
-  probe["calibrated"] = timestamp;
-
-  JsonArray points = probe["points"].to<JsonArray>();
-  JsonObject p1 = points.add<JsonObject>(); p1["temp_c"] = t1c; p1["resistance"] = r1;
-  JsonObject p2 = points.add<JsonObject>(); p2["temp_c"] = t2c; p2["resistance"] = r2;
-  JsonObject p3 = points.add<JsonObject>(); p3["temp_c"] = t3c; p3["resistance"] = r3;
 
   SD.remove(CAL_FILE);
   File f = sdOpenWrite(CAL_FILE);
   if (!f) return false;
   serializeJson(doc, f);
   f.close();
-  Serial.printf("Calibration saved for probe %u\n", probeIndex);
+  Serial.println(F("Calibration file saved"));
   return true;
 }
 
@@ -333,7 +337,18 @@ void loadCalibration() {
     probeCoeffs[i].A = A;
     probeCoeffs[i].B = B;
     probeCoeffs[i].C = C;
-    Serial.printf("Loaded calibration for probe %u: A=%.6e B=%.6e C=%.6e\n",
-                  i, A, B, C);
+
+    // Metadata is optional (older files may lack it); the coefficients are
+    // what matter. A missing timestamp still counts as "calibrated from SD".
+    const char* ts = doc[key]["calibrated"] | "unknown";
+    strlcpy(probeCal[i].calibrated, ts, sizeof(probeCal[i].calibrated));
+    JsonArray pts = doc[key]["points"].as<JsonArray>();
+    for (uint8_t k = 0; k < 3; k++) {
+      probeCal[i].t[k] = (pts && k < pts.size()) ? pts[k]["temp_c"].as<float>()     : NAN;
+      probeCal[i].r[k] = (pts && k < pts.size()) ? pts[k]["resistance"].as<float>() : NAN;
+    }
+
+    Serial.printf("Loaded calibration for probe %u: A=%.6e B=%.6e C=%.6e (%s)\n",
+                  i, A, B, C, probeCal[i].calibrated);
   }
 }
