@@ -16,12 +16,17 @@
 #ifndef MDNS_HOSTNAME
 #define MDNS_HOSTNAME "bbq"
 #endif
-#ifndef OTA_PASSWORD
-#define OTA_PASSWORD "bbq-update"
-#endif
 #ifndef DEBUG_READINGS
 #define DEBUG_READINGS 0
 #endif
+
+#include "net_guards.h"
+
+// These passwords protect firmware upload and the setup access point, so a
+// public default is worse than a failed build.
+static_assert(!sameStr(OTA_PASSWORD, "CHANGE_ME"), "Set OTA_PASSWORD in config.h");
+static_assert(!sameStr(AP_PASSWORD, "CHANGE_ME"), "Set AP_PASSWORD in config.h");
+static_assert(sizeof(AP_PASSWORD) > 8, "AP_PASSWORD needs at least 8 characters for WPA2");
 
 #include "wifi_manager.h"
 #include "thermistor.h"
@@ -190,15 +195,14 @@ void setup() {
   // serveStatic("/") below, which matches the "/" prefix.
   apiBegin(&server);
 
-  // The WiFi credential store lives in the same LittleFS the UI is served
-  // from — explicitly refuse to serve it, or anyone on the network could
-  // download the WiFi password in plaintext.
-  server.on(WIFI_CREDS_PATH, HTTP_ANY, [](AsyncWebServerRequest* req) {
-    req->send(404, "text/plain", "Not found");
-  });
-
-  // Serve web UI from LittleFS for every other route
-  server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
+  // Serve web UI from LittleFS. The WiFi credential store lives in the same
+  // filesystem — the filter refuses it, or anyone on the network could download
+  // the WiFi password in plaintext. Refused requests fall through to the 404.
+  server.serveStatic("/", LittleFS, "/")
+      .setDefaultFile("index.html")
+      .setFilter([](AsyncWebServerRequest* req) {
+        return !isBlockedStaticUrl(req->url().c_str());
+      });
   server.onNotFound([](AsyncWebServerRequest* req) {
     req->send(404, "text/plain", "Not found");
   });

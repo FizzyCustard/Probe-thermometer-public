@@ -37,6 +37,8 @@ window.__cookState = {
   notes: [],          // [{ ts (seconds since cook start), text, system?, temp? }]
   history: [],   // populated from SD card via cook_list WS message
   historyTruncated: false,  // firmware capped the list — older cooks not sent
+  targetHitAt: null,  // ms timestamp the active cook first reached its target
+  justStopped: null,  // session awaiting its device file name in the next cook_list
   favourites: [],     // populated from SD card via the config WS message
   selectedHistoryId: null,
   view: 'live',       // 'live' | 'history'
@@ -193,16 +195,17 @@ function confirmStartCook() {
   const rawLow  = parseFloat(document.getElementById('start-grill-low').value);
   const rawHigh = parseFloat(document.getElementById('start-grill-high').value);
   if (![rawMeat, rawLow, rawHigh].some(isNaN)) {
+    const meatC = unit === 'F' ? fToC(rawMeat) : rawMeat;
     const lowC  = unit === 'F' ? fToC(rawLow)  : rawLow;
     const highC = unit === 'F' ? fToC(rawHigh) : rawHigh;
-    // An inverted range makes updateUI() read every grill temperature as
-    // in-range — block the start rather than log a whole cook against it.
-    if (lowC >= highC) {
-      alert('Grill low must be below grill high.');
+    // Block the start rather than log a whole cook against bad targets.
+    const err = targetsError(meatC, lowC, highC);
+    if (err) {
+      alert(err);
       return;
     }
 
-    settings.meatTarget = unit === 'F' ? fToC(rawMeat) : rawMeat;
+    settings.meatTarget = meatC;
     settings.grillLow   = lowC;
     settings.grillHigh  = highC;
     
@@ -219,6 +222,7 @@ function confirmStartCook() {
   // Reset chart — fresh slate for this cook
   meatHistory.length  = 0;
   grillHistory.length = 0;
+  window.__cookState.targetHitAt = null;
   rebuildChart();
   alertFired = false;
 
@@ -259,14 +263,20 @@ function closeStopCookDialog() {
 }
 window.closeStopCookDialog = closeStopCookDialog;
 
+// Chart history holds null for a disconnected probe; stats want real values.
+function readings(history) {
+  return history.map(d => d.c).filter(c => c != null);
+}
+
 function confirmStopCook(saveAsFavourite) {
   const s = window.__cookState;
   if (!s.active) return;
   const duration = Math.floor((Date.now() - s.startedAt) / 1000);
-  const lastMeat  = meatHistory.length  ? meatHistory[meatHistory.length - 1].c  : null;
-  const lastGrill = grillHistory.length ? grillHistory[grillHistory.length - 1].c : null;
-  const peakMeat  = meatHistory.length  ? Math.max(...meatHistory.map(d => d.c))  : null;
-  const peakGrill = grillHistory.length ? Math.max(...grillHistory.map(d => d.c)) : null;
+  const meatC  = readings(meatHistory);
+  const grillC = readings(grillHistory);
+  const lastMeat  = meatC.length  ? meatC[meatC.length - 1]   : null;
+  const peakMeat  = meatC.length  ? Math.max(...meatC)  : null;
+  const peakGrill = grillC.length ? Math.max(...grillC) : null;
 
   const session = {
     id: 'c-' + Date.now(),
@@ -277,11 +287,14 @@ function confirmStopCook(saveAsFavourite) {
     targets: { ...settings },
     peakMeat:  peakMeat  != null ? Math.round(peakMeat  * 10) / 10 : null,
     peakGrill: peakGrill != null ? Math.round(peakGrill * 10) / 10 : null,
-    targetHitMin: lastMeat >= settings.meatTarget ? Math.floor(duration / 60) : null,
+    targetHitMin: s.targetHitAt ? Math.floor((s.targetHitAt - s.startedAt) / 60000)
+                : lastMeat >= settings.meatTarget ? Math.floor(duration / 60) : null,
     notes: s.notes.slice(),
     favourite: !!saveAsFavourite,
   };
   s.history.unshift(session);
+  s.justStopped = session;
+  s.targetHitAt = null;
 
   const stopTs = new Date().toISOString().replace(/\.\d{3}Z$/, '');
 
@@ -368,7 +381,8 @@ function addNote() {
   const s = window.__cookState;
   if (!s.active) return;
   const ts = Math.floor((Date.now() - s.startedAt) / 1000);
-  const lastMeat = meatHistory.length ? meatHistory[meatHistory.length - 1].c : null;
+  const meatC = readings(meatHistory);
+  const lastMeat = meatC.length ? meatC[meatC.length - 1] : null;
   s.notes.push({ ts, text, temp: lastMeat });
   wsSend({ type: 'cook_note', text, meat_c: lastMeat ?? 0 });
   input.value = '';
@@ -410,10 +424,12 @@ function renderFavourites() {
         <div class="fav-targets">${meat}°${unit} meat · ${lo}–${hi}°${unit} grill</div>
       </div>
       <div class="fav-actions">
-        <button class="fav-btn" onclick="loadFavourite('${f.id}', event)">Load</button>
-        <button class="fav-btn danger" onclick="deleteFavourite('${f.id}')" aria-label="Delete">✕</button>
+        <button class="fav-btn">Load</button>
+        <button class="fav-btn danger" aria-label="Delete">✕</button>
       </div>
     `;
+    row.querySelector('.fav-btn').onclick = e => loadFavourite(f.id, e);
+    row.querySelector('.fav-btn.danger').onclick = () => deleteFavourite(f.id);
     list.appendChild(row);
   });
 }

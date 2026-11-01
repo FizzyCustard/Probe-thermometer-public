@@ -13,6 +13,72 @@ network. Open `http://bbq.local/` in a browser and it's there.
   [`hardware/WIRING.md`](hardware/WIRING.md)
 - **Firmware internals:** [`arduino/FIRMWARE-SPEC.md`](arduino/FIRMWARE-SPEC.md)
 - **Planned features:** [`ROADMAP.md`](ROADMAP.md)
+- **Historical design and review notes:** [`docs/notes/`](docs/notes/)
+
+> **Not a food-safety device.** This is a hobby project with no certification.
+> Preset temperatures are guides, and readings depend on your probes and
+> calibration. Check food with a calibrated food thermometer before serving it.
+
+---
+
+## Build your own
+
+### Parts
+
+A D1 Mini (ESP8266), an ADS1115 ADC module, a micro SD card module, two 100 kΩ
+resistors, two 3.5 mm jack sockets, two 100 kΩ NTC probes and a USB battery pack.
+[`hardware/WIRING.md`](hardware/WIRING.md) has the full list and pinout.
+
+The electronics are low voltage, but the device itself is not heat-proof: keep
+the board, battery and cables away from the grill, and check your probes' rated
+maximum temperature, including the cable.
+
+### Flash the firmware
+
+You need [PlatformIO](https://platformio.org/install/cli). Library versions are
+pinned in `platformio.ini` and install automatically.
+
+```bash
+cp arduino/bbq-thermometer/config.example.h arduino/bbq-thermometer/config.h
+```
+
+Edit `config.h`. **The build fails until you replace both `CHANGE_ME` passwords**:
+`OTA_PASSWORD` protects firmware updates, and `AP_PASSWORD` protects the setup
+network (minimum 8 characters). `WIFI_SSID` and `WIFI_PASSWORD` are optional,
+because you can set up WiFi from the browser instead. `config.h` is gitignored.
+
+Connect the board over USB, then build and upload the firmware and web UI:
+
+```bash
+pio run -t upload
+```
+
+Later updates can go over WiFi using the `OTA_PASSWORD` you set:
+
+```bash
+PLATFORMIO_UPLOAD_FLAGS="--auth=YOUR_OTA_PASSWORD" pio run -t upload --upload-port bbq.local
+```
+
+An upload rewrites the whole filesystem, which erases WiFi details saved from the
+browser. Details compiled into `config.h` are restored on the next boot.
+
+### First boot
+
+If the device can't join a network it starts its own: connect to
+`BBQ-Thermometer` with your `AP_PASSWORD`, open `http://192.168.4.1/`, and pick
+your WiFi under Settings. After that the dashboard is at `http://bbq.local/`.
+Calibrate your probes from Settings for better accuracy.
+
+---
+
+## Security
+
+The device is designed for a **trusted home network** and must not be exposed to
+the internet. The dashboard, JSON API and WebSocket have no login, so anyone on
+your network can read temperatures and change settings, including WiFi details.
+WebSocket connections from browsers are only accepted from the device's own
+pages, which stops other websites driving it, and firmware updates need
+`OTA_PASSWORD`.
 
 ---
 
@@ -161,11 +227,31 @@ likewise unauthenticated, and the WebSocket additionally accepts *mutating*
 commands. Treat the device as trusted-LAN-only and do not port-forward it.
 
 Cook history and stored temperature series are not currently available over
-HTTP — only over the WebSocket. See [`bugs/known-issues.md`](bugs/known-issues.md).
+HTTP — only over the WebSocket. See [`docs/notes/known-issues.md`](docs/notes/known-issues.md).
 
 ### Known quirk
 
 `ts` is currently written in UTC rather than local time, so it can read an hour
 behind during British Summer Time. Tracked in
-[`bugs/known-issues.md`](bugs/known-issues.md); use your own client clock if
+[`docs/notes/known-issues.md`](docs/notes/known-issues.md); use your own client clock if
 that matters.
+
+---
+
+## Tests
+
+```bash
+npm install
+npx playwright-core install chromium-headless-shell
+npm test
+```
+
+`npm test` runs host-compiled firmware checks (needs `g++`) and browser tests of
+the web UI against a simulated device.
+
+## License
+
+[MIT](LICENSE). The web UI bundles [Chart.js](https://www.chartjs.org/) (MIT),
+and the firmware builds on ESPAsyncWebServer and ESPAsyncTCP (LGPL-3.0),
+ArduinoJson (MIT), the Adafruit ADS1X15 library (BSD) and NTPClient (MIT). Those
+libraries are downloaded at build time and are not included in this repository.

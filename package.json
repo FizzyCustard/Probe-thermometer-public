@@ -1,0 +1,13 @@
+{
+  "name": "bbq-monitor",
+  "private": true,
+  "description": "Tests for the BBQ Monitor firmware guards and web UI",
+  "scripts": {
+    "test": "npm run test:native && npm run test:web",
+    "test:native": "g++ -std=c++17 -Itests/native/stubs -Iarduino/bbq-thermometer tests/native/guards_test.cpp -o /tmp/bbq_guards_test && /tmp/bbq_guards_test",
+    "test:web": "node tests/smoke.test.js"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.62.1"
+  }
+}

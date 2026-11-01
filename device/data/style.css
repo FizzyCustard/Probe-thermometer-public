@@ -1457,6 +1457,13 @@ main > * {
   line-height: 1.5;
 }
 
+.dialog-disclaimer {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0 0 12px;
+}
+
 .history-truncated {
   font-size: 12px;
   color: var(--text-muted);

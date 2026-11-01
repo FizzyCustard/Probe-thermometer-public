@@ -11,12 +11,13 @@
 #define WIFI_PASSWORD   "YOUR_PASSWORD"
 
 // WPA2 password for the device's own setup access point (min 8 chars).
-#define AP_PASSWORD     "bbq-setup"
+// The build fails until this is changed.
+#define AP_PASSWORD     "CHANGE_ME"
 
 // ── OTA / mDNS ───────────────────────────────────────────────────────────────
 
 #define MDNS_HOSTNAME   "bbq"          // dashboard reachable at http://bbq.local
-#define OTA_PASSWORD    "bbq-update"   // change this before flashing
+#define OTA_PASSWORD    "CHANGE_ME"    // build fails until this is changed
 
 // ── NTP ──────────────────────────────────────────────────────────────────────
 //

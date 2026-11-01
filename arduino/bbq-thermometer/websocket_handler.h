@@ -6,6 +6,7 @@
 #include "logger.h"
 #include "cook_session.h"
 #include "wifi_manager.h"
+#include "net_guards.h"
 #include "snapshot.h"
 
 extern AsyncWebSocket ws;
@@ -20,12 +21,6 @@ extern uint8_t   favCount;
 // Defined in the .ino — declared here so handlers can timestamp on-device.
 String getTimestamp();
 bool   ntpReady();
-
-// Settings sanity limits (°C)
-#define MEAT_TARGET_MIN    0.0f
-#define MEAT_TARGET_MAX  150.0f
-#define GRILL_RANGE_MIN    0.0f
-#define GRILL_RANGE_MAX  400.0f
 
 // Forward declarations
 static void sendConfig(AsyncWebSocketClient* client);
@@ -80,8 +75,7 @@ void onWsMessage(AsyncWebSocketClient* client, const char* data, size_t len) {
     float mt = doc["meat_target"].as<float>();
     float gl = doc["grill_low"].as<float>();
     float gh = doc["grill_high"].as<float>();
-    if (mt < MEAT_TARGET_MIN || mt > MEAT_TARGET_MAX) return;
-    if (gl < GRILL_RANGE_MIN || gh > GRILL_RANGE_MAX || gl >= gh) return;
+    if (!targetsValid(mt, gl, gh)) return;
     if (mt == meatTarget && gl == grillLow && gh == grillHigh) return;  // no change — skip the SD write
 
     meatTarget = mt;
@@ -115,7 +109,8 @@ void onWsMessage(AsyncWebSocketClient* client, const char* data, size_t len) {
       strlcpy(ts, ok ? bts : "unknown", sizeof(ts));
     }
 
-    bool started = cookStart(name, preset, mt, gl, gh, ts);
+    bool started = targetsValid(mt, gl, gh) &&
+                   cookStart(name, preset, mt, gl, gh, ts);
 
     JsonDocument resp;
     resp["type"]    = "cook_started";
@@ -157,7 +152,11 @@ void onWsMessage(AsyncWebSocketClient* client, const char* data, size_t len) {
   // ── Favourite: save / update ──────────────────────────────────────────────
   if (strcmp(type, "fav_save") == 0) {
     const char* id = doc["id"] | "";
-    if (strlen(id) == 0) return;
+    if (!isSafeFavId(id)) return;
+    float favMeat = doc["meat_target"].as<float>();
+    float favLow  = doc["grill_low"].as<float>();
+    float favHigh = doc["grill_high"].as<float>();
+    if (!targetsValid(favMeat, favLow, favHigh)) return;
 
     // Find existing entry to update, or append
     int idx = -1;
@@ -183,9 +182,9 @@ void onWsMessage(AsyncWebSocketClient* client, const char* data, size_t len) {
     strlcpy(favs[idx].preset, doc["preset"] | "",            sizeof(favs[idx].preset));
     csvSanitize(favs[idx].name);
     csvSanitize(favs[idx].preset);
-    favs[idx].meatTarget = doc["meat_target"].as<float>();
-    favs[idx].grillLow   = doc["grill_low"].as<float>();
-    favs[idx].grillHigh  = doc["grill_high"].as<float>();
+    favs[idx].meatTarget = favMeat;
+    favs[idx].grillLow   = favLow;
+    favs[idx].grillHigh  = favHigh;
     saveFavourites(favs, favCount);
 
     sendConfig(client);
@@ -518,7 +517,10 @@ static void sendCookData(AsyncWebSocketClient* client, const char* file) {
   // 150 points is plenty at phone-chart resolution and keeps the JSON payload
   // well inside the ESP8266's heap headroom (this doc is built, serialised to
   // a String, then queued by the WS layer — three copies at peak).
+  // Notes need the same bound: nothing limits how many a cook can collect.
   const uint32_t MAX_POINTS = 150;
+  const uint16_t MAX_NOTES  = 100;
+  uint16_t notesTaken = 0;
   uint32_t stride = (dataRows + MAX_POINTS - 1) / MAX_POINTS;
   if (stride < 1) stride = 1;
 
@@ -544,7 +546,7 @@ static void sendCookData(AsyncWebSocketClient* client, const char* file) {
       // #note,<elapsed_s>,<text>,<meat_c>  — text may contain commas
       int c1   = line.indexOf(',', 6);
       int last = line.lastIndexOf(',');
-      if (c1 > 6 && last > c1) {
+      if (c1 > 6 && last > c1 && takeNoteSlot(notesTaken, MAX_NOTES)) {
         JsonObject n = notes.add<JsonObject>();
         n["ts"]   = (uint32_t)line.substring(6, c1).toInt();
         n["text"] = line.substring(c1 + 1, last);
@@ -825,6 +827,11 @@ void onWsEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
 }
 
 void wsBegin(AsyncWebServer* server) {
+  ws.handleHandshake([](AsyncWebServerRequest* req) {
+    const AsyncWebHeader* origin = req->getHeader("Origin");
+    return originMatchesHost(origin ? origin->value().c_str() : nullptr,
+                             req->host().c_str());
+  });
   ws.onEvent(onWsEvent);
   server->addHandler(&ws);
 }

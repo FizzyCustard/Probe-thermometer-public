@@ -11,6 +11,11 @@ extern bool adsReady;   // false when the ADS1115 failed to initialise
 #define PROBE_R_MIN       500.0f
 #define PROBE_R_MAX   2000000.0f
 
+// Result window: bad coefficients can turn a sane resistance into a nonsense
+// temperature, which should read as "no probe" rather than a real value.
+#define PROBE_KELVIN_MIN  173.15f   // -100 °C
+#define PROBE_KELVIN_MAX  673.15f   //  400 °C
+
 // ── Steinhart-Hart coefficients ───────────────────────────────────────────────
 
 struct SHCoeffs {
@@ -81,8 +86,10 @@ float resistanceToCelsius(float resistance, uint8_t probeIndex) {
   float L = log(resistance);
   const SHCoeffs& c = probeCoeffs[probeIndex];
   float invT = c.A + c.B * L + c.C * L * L * L;
-  if (invT <= 0.0f) return NAN;
-  return (1.0f / invT) - 273.15f;
+  if (!isfinite(invT) || invT <= 0.0f) return NAN;
+  float kelvin = 1.0f / invT;
+  if (kelvin < PROBE_KELVIN_MIN || kelvin > PROBE_KELVIN_MAX) return NAN;
+  return kelvin - 273.15f;
 }
 
 // Convenience: read a channel and return °C directly.

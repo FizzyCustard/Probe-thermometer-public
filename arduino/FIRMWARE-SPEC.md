@@ -42,8 +42,9 @@ Install all via Arduino IDE Library Manager or `platformio.ini`.
 | `NTPClient` | Fabrice Weinberg | NTP time sync over WiFi |
 | `WiFiUdp` | ESP8266 core (built-in) | Required by NTPClient |
 
-> **Note:** ESPAsyncWebServer and ESPAsyncTCP must be installed manually from
-> GitHub — they are not in the standard Library Manager.
+> **Note:** ESPAsyncWebServer and ESPAsyncTCP are not in the standard Library
+> Manager. PlatformIO installs them from GitHub via `lib_deps` in
+> `platformio.ini`. In the Arduino IDE, install them manually from:
 > - https://github.com/me-no-dev/ESPAsyncWebServer
 > - https://github.com/me-no-dev/ESPAsyncTCP
 
@@ -107,9 +108,12 @@ Uses the **full 3-coefficient Steinhart-Hart equation** for best accuracy:
 1/T(K) = A + B·ln(R) + C·(ln(R))³
 ```
 
-This is more accurate than the simpler B-parameter equation (±0.1°C vs ±2°C
-over the calibrated range), especially important for the meat probe where
-hitting a precise target matters.
+This fits a probe's calibration points more closely than the simpler
+B-parameter equation, which matters for the meat probe where hitting a precise
+target matters. Resolution is set by the ADS1115 (16-bit, ±4.096 V at
+GAIN_ONE, about 0.125 mV per count). The temperature accuracy actually achieved
+depends on the individual probe, the divider resistor tolerance, and
+calibration; this spec does not guarantee a figure.
 
 ### ADC → Resistance
 
@@ -362,9 +366,9 @@ line in `platformio.ini` for that run.
 - [x] Implement `loggerBegin()` and `logReading()` in `logger.h`
 - [x] Implement `wsBroadcast()` JSON serialisation in `websocket_handler.h`
 - [x] Wire up NTP timestamp formatting
-- [x] Web UI: WebSocket live mode with simulation fallback
+- [x] Web UI: WebSocket live mode
 - [x] Fix iOS keyboard scroll bug (see `BUG-ios-keyboard-scroll.md`)
 - [ ] Test calibration end-to-end with real probes (ice water + boiling water)
 - [ ] Test SD logging over a full cook session
-- [ ] Add mDNS (`bbq.local`) — v2
-- [ ] Persist target settings to EEPROM — v2
+- [x] Add mDNS (`bbq.local`) and OTA updates
+- [x] Persist target settings to SD (`/BBQ/config/settings.csv`)
