@@ -36,6 +36,7 @@ window.__cookState = {
   preset: null,
   notes: [],          // [{ ts (seconds since cook start), text, system?, temp? }]
   history: [],   // populated from SD card via cook_list WS message
+  historyTruncated: false,  // firmware capped the list — older cooks not sent
   favourites: [],     // populated from SD card via the config WS message
   selectedHistoryId: null,
   view: 'live',       // 'live' | 'history'
@@ -52,6 +53,14 @@ function formatDuration(seconds) {
   if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m`;
   if (m > 0) return `${m}m ${String(s).padStart(2, '0')}s`;
   return `${s}s`;
+}
+
+// Big stat cells render the unit in their own <span>, so the number must come
+// through bare - formatDuration()'s "1h 20m" would double the unit up as "1hh".
+function durationStatParts(seconds) {
+  if (seconds >= 3600) return { value: (seconds / 3600).toFixed(1), unit: 'h' };
+  if (seconds >= 60)   return { value: String(Math.floor(seconds / 60)), unit: 'm' };
+  return { value: String(Math.floor(seconds)), unit: 's' };
 }
 
 function formatRelDate(ts) {
@@ -184,9 +193,18 @@ function confirmStartCook() {
   const rawLow  = parseFloat(document.getElementById('start-grill-low').value);
   const rawHigh = parseFloat(document.getElementById('start-grill-high').value);
   if (![rawMeat, rawLow, rawHigh].some(isNaN)) {
+    const lowC  = unit === 'F' ? fToC(rawLow)  : rawLow;
+    const highC = unit === 'F' ? fToC(rawHigh) : rawHigh;
+    // An inverted range makes updateUI() read every grill temperature as
+    // in-range — block the start rather than log a whole cook against it.
+    if (lowC >= highC) {
+      alert('Grill low must be below grill high.');
+      return;
+    }
+
     settings.meatTarget = unit === 'F' ? fToC(rawMeat) : rawMeat;
-    settings.grillLow   = unit === 'F' ? fToC(rawLow)  : rawLow;
-    settings.grillHigh  = unit === 'F' ? fToC(rawHigh) : rawHigh;
+    settings.grillLow   = lowC;
+    settings.grillHigh  = highC;
     
     if (window.__cookState.preset) {
       const p = window.__presets.find(x => x.name === window.__cookState.preset);
@@ -425,6 +443,7 @@ function loadFavourite(id, e) {
 window.loadFavourite = loadFavourite;
 
 function deleteFavourite(id) {
+  if (!confirm('Delete this favourite?')) return;
   window.__cookState.favourites = window.__cookState.favourites.filter(f => f.id !== id);
   wsSend({ type: 'fav_delete', id });
   renderFavourites();
@@ -501,15 +520,23 @@ function renderHistoryList() {
     row.onclick = () => openHistoryDetail(c.id);
     list.appendChild(row);
   });
+
+  if (s.historyTruncated) {
+    const notice = document.createElement('div');
+    notice.className = 'history-truncated';
+    notice.textContent = `Showing the ${s.history.length} most recent cooks — older files are still on the SD card.`;
+    list.appendChild(notice);
+  }
 }
 
 let detailReplayChart = null;
 
 function renderHistoryDetailStats(c) {
+  const dur = durationStatParts(c.duration);
   document.getElementById('detail-stats').innerHTML = `
     <div class="stat-cell">
       <span class="stat-label">Duration</span>
-      <span class="stat-value">${formatDuration(c.duration).split(' ')[0]}<span class="stat-unit">${c.duration >= 3600 ? 'h' : 'm'}</span></span>
+      <span class="stat-value">${dur.value}<span class="stat-unit">${dur.unit}</span></span>
     </div>
     <div class="stat-cell">
       <span class="stat-label">Peak meat</span>

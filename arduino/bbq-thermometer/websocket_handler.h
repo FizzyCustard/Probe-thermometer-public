@@ -369,7 +369,21 @@ static void cookListParseLine(const String& line, JsonObject& cook,
   }
 }
 
-// Build the cook history list (metadata for every cook file) and send it.
+// Build the cook history list and send it — newest cooks first, capped.
+//
+// The cap is not optional: the response is built as a JsonDocument, serialised
+// into a String, then queued by the WS layer — three copies live at peak, and
+// every finished cook adds an entry forever. Without a limit a well-used card
+// starves the heap and resets the board. (sendCookData() bounds itself the same
+// way with MAX_POINTS.)
+//
+// Cook files are named cook_<ISO timestamp>.csv, so lexicographic order IS
+// chronological order and the newest cooks are the largest names. Pass 1 reads
+// directory entries only — no file opens — and keeps just the newest
+// MAX_COOK_LIST names; pass 2 then parses those files and nothing else, which
+// also makes this cheaper than the old scan-everything loop once the card fills
+// up. A cook started before the clock syncs is named cook_unknown*.csv, which
+// sorts after any timestamp and is therefore always kept.
 //
 // Large files are NOT read end-to-end: the header block lives in the first few
 // hundred bytes and the footer/last-sample in the last few hundred, so we read
@@ -378,61 +392,102 @@ static void cookListParseLine(const String& line, JsonObject& cook,
 static void sendCookList(AsyncWebSocketClient* client) {
   const size_t CHUNK = 768;
 
-  JsonDocument resp;
-  resp["type"] = "cook_list";
-  JsonArray arr = resp["cooks"].to<JsonArray>();
+  // 30 names x 40 bytes of BSS, traded against an unbounded heap spike. Longer
+  // names cannot be ours (cookStart() generates at most 31 chars) so they are
+  // skipped rather than silently truncated into a path that will not open.
+  const uint8_t MAX_COOK_LIST = 30;
+  const uint8_t COOK_NAME_MAX = 40;
+  static char recent[MAX_COOK_LIST][COOK_NAME_MAX];
+  uint8_t count     = 0;   // entries in `recent`, ascending (oldest at [0])
+  bool    truncated = false;
 
+  // ── Pass 1: pick the newest MAX_COOK_LIST filenames ────────────────────────
   File dir = SD.open(BBQ_COOKS);
   if (dir) {
     while (true) {
       File entry = dir.openNextFile();
       if (!entry) break;
-      if (entry.isDirectory()) { entry.close(); continue; }
-
-      String fname = String(entry.name());
+      bool   isDir = entry.isDirectory();
+      String fname = isDir ? String() : String(entry.name());
       entry.close();
+      if (isDir) continue;
       if (!fname.startsWith("cook_") || !fname.endsWith(".csv")) continue;
+      if (fname.length() >= COOK_NAME_MAX) continue;
 
-      String fullPath = String(BBQ_COOKS) + "/" + fname;
-      File f = SD.open(fullPath.c_str(), FILE_READ);
-      if (!f) continue;
+      const char* cand = fname.c_str();
 
-      JsonObject cook = arr.add<JsonObject>();
-      cook["file"] = fname;
-      uint32_t lastElapsed = 0;
-      bool     stopped     = false;
-      size_t   size        = f.size();
-
-      if (size <= 2 * CHUNK) {
-        // Small file — scan everything
-        while (f.available()) {
-          String line = f.readStringUntil('\n');
-          line.trim();
-          cookListParseLine(line, cook, lastElapsed, stopped);
+      if (count < MAX_COOK_LIST) {
+        // Room left: insertion-sort `cand` into the window.
+        uint8_t i = count;
+        while (i > 0 && strcmp(recent[i - 1], cand) > 0) {
+          memcpy(recent[i], recent[i - 1], COOK_NAME_MAX);
+          i--;
         }
+        strlcpy(recent[i], cand, COOK_NAME_MAX);
+        count++;
+      } else if (strcmp(cand, recent[0]) > 0) {
+        // Window full and `cand` is newer than the oldest kept — evict [0].
+        truncated = true;
+        uint8_t i = 0;
+        while (i + 1 < MAX_COOK_LIST && strcmp(recent[i + 1], cand) < 0) {
+          memcpy(recent[i], recent[i + 1], COOK_NAME_MAX);
+          i++;
+        }
+        strlcpy(recent[i], cand, COOK_NAME_MAX);
       } else {
-        // Head chunk: metadata header block ends at the CSV column row
-        while (f.available() && f.position() < CHUNK) {
-          String line = f.readStringUntil('\n');
-          line.trim();
-          if (line.startsWith("elapsed")) break;
-          cookListParseLine(line, cook, lastElapsed, stopped);
-        }
-        // Tail chunk: last sample row and (if the cook finished) #stopped_at
-        f.seek(size - CHUNK);
-        f.readStringUntil('\n');  // discard the partial line at the seek point
-        while (f.available()) {
-          String line = f.readStringUntil('\n');
-          line.trim();
-          cookListParseLine(line, cook, lastElapsed, stopped);
-        }
+        truncated = true;   // older than everything we are keeping
       }
-      f.close();
-
-      if (!stopped) cook["duration_s"] = lastElapsed;
-      yield();   // keep WiFi + watchdog fed between files
+      yield();
     }
     dir.close();
+  }
+
+  JsonDocument resp;
+  resp["type"] = "cook_list";
+  if (truncated) resp["truncated"] = true;
+  JsonArray arr = resp["cooks"].to<JsonArray>();
+
+  // ── Pass 2: parse the kept files, newest first ─────────────────────────────
+  for (int8_t idx = (int8_t)count - 1; idx >= 0; idx--) {
+    String fname    = String(recent[idx]);
+    String fullPath = String(BBQ_COOKS) + "/" + fname;
+    File f = SD.open(fullPath.c_str(), FILE_READ);
+    if (!f) continue;
+
+    JsonObject cook = arr.add<JsonObject>();
+    cook["file"] = fname;
+    uint32_t lastElapsed = 0;
+    bool     stopped     = false;
+    size_t   size        = f.size();
+
+    if (size <= 2 * CHUNK) {
+      // Small file — scan everything
+      while (f.available()) {
+        String line = f.readStringUntil('\n');
+        line.trim();
+        cookListParseLine(line, cook, lastElapsed, stopped);
+      }
+    } else {
+      // Head chunk: metadata header block ends at the CSV column row
+      while (f.available() && f.position() < CHUNK) {
+        String line = f.readStringUntil('\n');
+        line.trim();
+        if (line.startsWith("elapsed")) break;
+        cookListParseLine(line, cook, lastElapsed, stopped);
+      }
+      // Tail chunk: last sample row and (if the cook finished) #stopped_at
+      f.seek(size - CHUNK);
+      f.readStringUntil('\n');  // discard the partial line at the seek point
+      while (f.available()) {
+        String line = f.readStringUntil('\n');
+        line.trim();
+        cookListParseLine(line, cook, lastElapsed, stopped);
+      }
+    }
+    f.close();
+
+    if (!stopped) cook["duration_s"] = lastElapsed;
+    yield();   // keep WiFi + watchdog fed between files
   }
 
   String out;

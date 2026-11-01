@@ -384,9 +384,18 @@ function applySettings() {
   const rawLow  = parseFloat(document.getElementById('s-grill-low').value);
   const rawHigh = parseFloat(document.getElementById('s-grill-high').value);
   if ([rawMeat, rawLow, rawHigh].some(isNaN)) return;
+
+  const lowC  = unit === 'F' ? fToC(rawLow)  : rawLow;
+  const highC = unit === 'F' ? fToC(rawHigh) : rawHigh;
+  // An inverted range makes updateUI() read every grill temperature as in-range.
+  if (lowC >= highC) {
+    alert('Grill low must be below grill high.');
+    return;
+  }
+
   settings.meatTarget = unit === 'F' ? fToC(rawMeat) : rawMeat;
-  settings.grillLow   = unit === 'F' ? fToC(rawLow)  : rawLow;
-  settings.grillHigh  = unit === 'F' ? fToC(rawHigh) : rawHigh;
+  settings.grillLow   = lowC;
+  settings.grillHigh  = highC;
   sendSettings(); // push to device if connected
 
   // Reset meat alert so it can fire again against the new target
@@ -678,6 +687,9 @@ function handleCookData(data) {
 
 function handleCookList(data) {
   if (!window.__cookState || !Array.isArray(data.cooks)) return;
+  // Firmware caps the list to keep the payload inside the ESP8266's heap and
+  // sends truncated:true when older cooks were left off.
+  window.__cookState.historyTruncated = data.truncated === true;
   window.__cookState.history = data.cooks.map(c => ({
     id:         c.file,
     name:       c.name   || c.file,

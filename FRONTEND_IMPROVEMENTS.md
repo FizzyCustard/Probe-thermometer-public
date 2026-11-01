@@ -1,217 +1,225 @@
-# BBQ Monitor — Frontend Improvements Audit
+# BBQ Monitor — Frontend Improvements
 
-A thorough review of the current UI/UX across the web dashboard (`data/` and `device/data/`). Items are grouped by area and loosely ordered by impact within each section.
+Open ideas for the web dashboard (`device/data/`). Pruned on 2026-09-11 against
+the current code: anything already built, contradicted by the hardware, or not
+worth the complexity was removed (see the log at the bottom). Items are grouped
+by area and loosely ordered by value within each section.
 
----
-
-## 1. UI / Visual Design
-
-### Probe card asymmetry
-The Meat card has a progress bar, target label, and ETA badge. The Grill card has none of these — it only shows the temperature and a plain range label. Adding a visual indicator of where the grill sits within its target range (e.g. a small range bar with a marker) would bring parity and give the user a quicker at-a-glance read.
-
-### Temperature readout could scale up on larger screens
-The `probe-temp` font size is fixed rather than fluid. On a tablet or wide monitor the cards occupy a lot of empty space while the temperature number stays small. A `clamp()`-based fluid size would use that space better.
-
-### No favicon or PWA web app manifest
-The app has no `<link rel="icon">` and no `manifest.json`. Adding both would improve the experience when the page is bookmarked or added to a home screen — the user sees a blank page icon today.
-
-### Settings button is easy to miss
-The fixed bottom `⚙ Settings` button is a low-contrast ghost pill. Users exploring the UI for the first time can miss it. Giving it a more prominent style or adding a brief tooltip/hint on first visit would reduce friction.
-
-### No light mode [IGNORE]
-The app is dark-only. Users in bright outdoor environments (which is where BBQs happen) sometimes struggle with dark UIs. A system-preference-aware light mode (`prefers-color-scheme: light`) and/or a manual toggle would help.
-
-### Connection pill has no visual weight
-The `DEMO` / `LIVE` pill in the header uses a small text tag that blends into the brand area. Differentiating the colour between demo (e.g. amber) and live (e.g. green) would let users confirm connection state at a glance without reading.
-
-### Status pill colours are colour-only
-`IN RANGE`, `TOO LOW`, `TOO HIGH`, `TARGET REACHED` rely entirely on colour to communicate state. Adding a small icon alongside each status (e.g. ✓, ↓, ↑, 🎯) makes the indicator readable for colour-blind users and on low-brightness screens.
-
-### No loading skeleton for the chart
-On initial load (especially on the live device where data may take a moment to arrive) the chart area is blank. A simple pulsing skeleton placeholder would prevent the layout from looking broken while data is loading.
+Each item is tagged **[P1]**, **[P2]** or **[P3]**: P1 is a change you would
+notice and value in daily use, P2 is worth doing but not urgent, P3 is a nice
+to have that could slip from the next push without anyone missing it.
 
 ---
 
-## 2. UX & Interactions
+## 1. Live view
 
-### No connecting / loading state
-When the page loads or the WebSocket reconnects, there is no explicit indication that the app is trying to establish a connection. The user sees `DEMO` mode immediately but there is no "Connecting…" transition state before the fallback kicks in. A brief connecting animation before switching to demo mode would reduce confusion.
+### Grill card has no range indicator [P1]
+The Meat card has a progress bar, target label and ETA badge. The Grill card
+only shows the temperature and a "Range 160–200°C" label. A small horizontal
+band with a marker showing where the grill sits inside (or outside) its range
+would give the same at-a-glance read the meat card already has, and make
+TOO LOW / TOO HIGH obvious without reading the pill.
 
-### No input validation feedback
-Settings inputs (meat target, grill low/high) have no visible validation. Users can enter impossible values (e.g. grill low > grill high, or a meat target of 500 °C) and the form silently accepts them. Inline error messages under the fields would catch this before the values are sent to the device.
+### Temperature trend arrow [P1]
+The ETA badge says how long to target but nothing says whether a probe is
+climbing, flat, or falling right now. A small ↑ / → / ↓ on each card, from the
+slope of the last few readings (the ETA code already fits one), would make a
+stall or a lid-open dip visible instantly.
 
-### No undo after applying settings
-The "Update Targets" button applies immediately with only a brief "Updated ✓" text flip. There is no way to revert a change if the user made a typo. A brief toast with an "Undo" action (keeping the previous values in memory for ~5 s) would reduce mistakes during a cook.
+### Status pills are colour-only [P2]
+`IN RANGE`, `TOO LOW`, `TOO HIGH` and `TARGET REACHED` differ only by colour.
+Add a glyph (✓ ↓ ↑ 🎯) so they read in bright sunlight and for colour-blind
+users, and keep the text in the pill's accessible name.
 
-### History tab badge only updates on page load
-The `tab-count` badge on the History tab is set once in the `DOMContentLoaded` handler. If the user completes a cook and navigates to History without reloading, the count may be stale. It should update whenever a cook is added to history.
+### Audible alarm [P1]
+Target-reached already fires a system notification, but there is no sound, and
+the grill going out of range fires nothing at all. A short Web Audio beep on
+target reached, and a notification + beep when the grill leaves its range for
+more than a minute, would let the user walk away from the screen. Needs a
+mute toggle and a first-interaction unlock (browsers block audio until a tap).
 
-### No keyboard navigation for the settings sheet
-The settings sheet traps focus badly — there is no explicit focus trap, so Tab can escape the sheet into the hidden main content. Implementing a proper focus trap (`inert` on the background or manual Tab intercept) would fix keyboard accessibility.
-
-### Swipe gesture to switch views not implemented
-On mobile, switching between Live and History requires tapping the tab bar. A horizontal swipe gesture between the two panels would feel more native and is already expected by smartphone users.
-
-### No confirmation before deleting a favourite
-Tapping ✕ on a favourite deletes it immediately with no undo. A single extra confirmation step or brief undo toast would prevent accidental deletions.
-
-### Start-cook dialog pre-fills targets from settings, but no visual confirmation
-The user might change settings and then start a cook — the dialog pre-fills the current targets, but there is nothing drawing the user's eye to verify them. A summary line ("Using meat 74 °C · grill 160–200 °C") before the inputs would help.
-
----
-
-## 3. Data Visualisation
-
-### No reference lines on the live chart
-The live temperature history chart shows two lines (meat, grill) but no horizontal reference lines for the meat target or the grill low/high bounds. Adding these as dashed annotation lines would let the user see proximity to target without looking away from the chart.
-
-### No zoom or pan on the live chart [Approved]
-The chart is locked to a rolling 60-minute window. If the user wants to inspect a specific period (e.g. right when they added a spritz) they cannot zoom in. Chart.js supports zoom/pan via a plugin; enabling it would make the chart much more useful on longer cooks.
-
-### Grill and meat use the same Y axis
-Meat and grill temperatures often occupy very different ranges (e.g. meat 40–80 °C, grill 150–220 °C). Plotting both on a single axis means one line is often cramped into a small band. A dual Y-axis (left for meat, right for grill) would give each line the full visual range.
-
-### Replay chart in History is synthetic
-The history replay chart reconstructs the curve mathematically from just peak values and duration — it is not real recorded data. Storing actual temperature readings to the SD card during a cook and replaying those would give a genuine trace. This is a firmware change as much as a UI one, but the UI should be designed to accommodate real data.
-
-### No chart export
-There is no way to save or share a chart. A "Save image" button that calls `canvas.toDataURL()` and triggers a download would let users keep a record of a cook.
-
-### Sparklines in history list have no axis labels
-The small sparkline SVGs in the history rows give a rough shape of the cook but have no temperature scale or time axis. Even a min/max label at the ends of the Y axis would add interpretability.
+### Settings button is easy to miss [P3]
+The fixed bottom `⚙ Settings` pill is low-contrast and blends into the page.
+Slightly more weight (filled background, or the primary colour on the icon)
+would help first-time users find calibration and WiFi setup.
 
 ---
 
-## 4. Cook Notes
+## 2. Settings & inputs
 
-### No quick-action note buttons
-Users frequently add the same notes during a cook (e.g. "Spritzed", "Wrapped in foil", "Lid opened", "Added wood"). A row of tap-to-insert chip buttons above the note input would speed up note-taking, especially with smoky hands.
+### No validation of target inputs [P2]
+Both the Settings sheet and the Start Cook dialog accept any numbers: grill
+low above grill high, a meat target of 500 °C. The firmware silently drops an
+invalid `settings` message, so the UI shows "Updated ✓" for a change that
+never happened. Validate before sending (low < high, sane ranges) and show an
+inline error under the field. Also listed in `TODO.md`.
 
-### No note editing or deletion
-Once a note is submitted it is permanent. A long-press or swipe-to-reveal action to edit or delete a note would give users control over their session log.
+### No acknowledgement that the device applied a settings change [P2]
+"Updated ✓" flips as soon as the message is sent. The firmware sends no reply
+for `settings`, so a dropped or rejected update looks identical to a success.
+Add a `settings_saved` reply in the firmware and turn the tick into a warning
+if it does not arrive within a few seconds.
 
-### Notes card hidden until cook is active
-The Notes card only appears after `Start cook` is tapped. For a user who just loaded the page mid-cook (e.g. on a second device) the notes they have already added are not visible until they know to look in History. Consider showing the notes card (or a summary) any time a cook is active, even if the page was freshly loaded with data from the device.
+### Targets changed on another device are not reflected [P2]
+The 1 s tick carries the targets in force (`meat_target`, `grill_low`,
+`grill_high`) but the UI ignores them and only reads targets from the `config`
+message on connect. Change the target on a phone and a tablet showing the same
+cook keeps drawing the old target line until it reconnects. Adopt the tick's
+values when they differ, and show a brief "Targets updated from another
+device" note.
 
-### No note export
-There is no way to copy or export the notes from a cook. A "Copy notes" button or export to text/markdown would be useful for sharing cook logs.
+### Favourites cannot be edited [P2]
+A saved favourite can only be loaded or deleted. Renaming or nudging its
+targets means delete and re-save. An edit flow (tap to rename, adjust targets)
+would make favourites more useful. Needs a `fav_update` message in the
+firmware or delete-and-recreate under the same id.
 
----
+### Deleting a favourite has no confirmation or undo [P2]
+The ✕ on a favourite row deletes immediately. Either a confirm step or a short
+undo toast (hold the deleted favourite in memory for a few seconds before
+sending `fav_delete`) would prevent fat-finger losses.
 
-## 5. History & Analytics
-
-### No filter or sort on the history list
-History is shown in reverse-chronological order with no way to filter by date, preset, cook name, or favourite status. A simple sort-by selector and a search input would make the list useful as the number of cooks grows.
-
-### No cook comparison
-There is no way to open two cook histories side-by-side. A "Compare" mode where the user picks two cooks and sees both replay charts overlaid would help them iterate on technique.
-
-### No aggregate statistics
-There is no summary view showing things like: total cooks recorded, average cook duration, most-used preset, longest cook. A simple stats card at the top of the History tab would surface this data without extra navigation.
-
-### No data export
-History data lives only in device memory / SD card. There is no export to CSV, JSON, or a shareable link. An export function would let users back up their cooks and analyse them in a spreadsheet.
-
-### Favourite star in history detail is easy to miss
-The `★` button in the detail modal header is small and borderless. Making it more prominent (e.g. a pill button reading "★ Favourite") or moving it to a more predictable location would improve discoverability.
-
----
-
-## 6. Settings & Calibration
-
-### No validation that grill low < grill high
-The two grill range inputs accept any number independently. If `grill-low` is set higher than `grill-high` the range indicator will invert silently. A validation check with an inline error message would prevent this.
-
-### ~~Calibration status is not persisted visually~~ — done
-The calibration wizard's collapsed header now shows "Meat ✓ [date] · Grill defaults", fed by the `calibration` block of the `config` message. See `CALIBRATION-PLAN.md`.
-
-### ~~No validation that calibration temperatures are monotonically increasing~~ — done
-Distinct-temperature and monotonic-resistance checks now run both in the wizard (before Save is enabled) and in the firmware (`calibrateFromPoints()`), and rejections name the offending point.
-
-### ~~Calibration collapse is not remembered~~ — superseded
-The wizard persists its whole state (step, reference temperatures, captured points) in `localStorage`, so a reload resumes the calibration rather than just re-expanding the section.
-
-### Favourites have no edit-in-place
-Saved favourites can only be loaded or deleted. There is no way to rename a favourite or adjust its target temperatures without deleting and re-saving it. An edit flow (tap name to rename, tap targets to adjust) would make favourites more useful.
-
-### No "Reset to defaults" option in Settings
-There is no way to clear all favourites and return settings to factory defaults without manually deleting each favourite and re-entering default targets. A single destructive "Reset settings" action (with confirmation) would be useful for troubleshooting.
+### Presets can only be edited on the SD card [P3]
+Doneness presets load from `/BBQ/config/presets.csv`; there is no way to add
+or rename one in the UI. Low priority because favourites cover the common
+"same targets every time" case, but a small add/remove list in Settings would
+finish the feature.
 
 ---
 
-## 7. Connectivity & Device State
+## 3. Chart
 
-### No signal strength display
-The header shows `DEMO` or `LIVE` but there is no WiFi signal strength indicator. On a live device session, a small signal strength icon (available from the device via WebSocket) would help the user know if they are at risk of losing connection as they move around.
+### Zoom and pan on the live chart [P1] **[Approved]**
+The chart is locked to a rolling 60-minute window, so a specific moment (the
+spritz, the wrap) cannot be inspected. Chart.js supports this via
+`chartjs-plugin-zoom`. The plugin must be bundled into `device/data` like
+Chart.js is (the device has no internet, and every extra KB comes out of
+LittleFS), and pinch-zoom must not fight the page scroll on phones.
 
-### No explicit sync status
-When the user taps "Update Targets" the values are sent to the device, but there is no confirmation that the device received and applied them beyond the "Updated ✓" text flip. A tick that changes to a warning icon if the WebSocket ack is not received within a few seconds would give genuine feedback.
+### Chart export [P3]
+There is no way to save or share a chart. A "Save image" button using
+`canvas.toDataURL()` is a few lines; the useful part is drawing the cook name,
+date and targets onto the exported image first.
 
-### No offline / reconnect handling
-If the WebSocket drops mid-cook, the UI falls back to simulation with no visible indication that it has lost the live feed. A persistent warning banner while in a disconnected-but-was-live state would prevent the user from trusting simulated data as real.
-
-### No conflict resolution if device config diverges
-If the user changes settings from two devices simultaneously (phone + tablet both connected), there is no merge strategy. The last writer wins silently. At minimum the UI should note "Settings updated by another device" when it receives a config push it did not initiate.
-
----
-
-## 8. Accessibility
-
-### Missing `aria-label` on several interactive elements
-- The `★` favourite toggle buttons have no `aria-label` that changes based on state ("Add to favourites" / "Remove from favourites")
-- The history sparkline containers have no `aria-label` describing what they represent
-- The note `Add` button could carry more context (`aria-label="Add cook note"`)
-
-### No visible focus ring on card-level buttons
-Custom buttons (fav rows, preset chips, history rows) suppress the default browser focus ring without providing a custom one. Keyboard users have no visible indication of focus position. Adding `:focus-visible` outlines restores this.
-
-### Colour-only status communication (see also Visual Design §7)
-`aria-label` on status pills should include the status text even if an icon is added, so screen readers announce it correctly.
-
-### Settings sheet does not implement a focus trap
-Tabbing through the settings sheet can move focus to elements behind it, which are visually hidden. A focus trap (`inert` attribute or manual Tab intercept) is required for modal accessibility compliance.
+### History sparklines are synthetic [P2]
+The small curves in the history list are generated from a seed and the peak
+temperature; they are not the cook's data. Either draw them from real
+downsampled points (costly: one `cook_data` request per row on an ESP8266) or
+drop them, since a fake shape next to real numbers is misleading.
 
 ---
 
-## 9. Performance & PWA
+## 4. Cook notes
 
-### No service worker
-The app has no service worker, so it cannot be used offline or cached for fast repeat loads. On the live device (ESP8266), a service worker caching the static assets would reduce re-download overhead and allow the dashboard to load even if the device is briefly unreachable.
+### Quick-action note chips [P1]
+The same notes recur every cook: "Spritzed", "Wrapped", "Lid opened", "Added
+wood". A row of tap-to-insert chips above the note input would speed this up
+with smoky hands. The chips could be the last N distinct notes across history,
+so they learn the user's vocabulary.
 
-### No web app manifest
-Without a `manifest.json` (name, icons, `display: standalone`, theme colour), adding the page to the home screen produces a generic browser bookmark. A manifest would enable a proper installed-app experience.
+### Notes are invisible on a freshly loaded page mid-cook [P2]
+Open the dashboard on a second device during a cook and the notes card only
+shows a "cook already in progress" system line; the notes already written
+are not sent until the cook appears in History. The firmware could include the
+active cook's notes in `config` (it already parses `#note` lines for
+`cook_data`).
 
-### Chart resize debounce could be tighter
-The window resize handler rebuilds the Chart.js instance after a 400 ms debounce. On rapid resize (e.g. split-screen on iPad) this causes visible flicker. Separating canvas resize (immediate) from full chart rebuild (debounced) would reduce the flash.
-
-### CDN dependency for Chart.js
-Chart.js is loaded from `cdn.jsdelivr.net`. On a local device network with no internet access, this request will fail and the chart will not render. Bundling or self-hosting Chart.js in the firmware flash would make the dashboard work offline.
-
----
-
-## 10. Missing Features
-
-### Alarm / push notification on target reached
-When the meat hits its target temperature the UI pulses pink, but there is no sound or system notification. Implementing a Web Audio API beep and/or the Web Notifications API (with a permission prompt on first cook start) would let the user walk away from the screen without missing the target.
-
-### Temperature trend indicator
-The ETA badge shows estimated minutes to target but there is no simple rising/falling arrow on each probe card. A small ↑ / → / ↓ indicator (based on the last few readings) would immediately convey whether the temperature is climbing, plateauing, or falling.
-
-### Cook timer countdown
-The cook bar shows elapsed time. A companion countdown ("~2 h 14 m to target") alongside the ETA badge on the probe card, displayed more prominently, would be useful for planning.
-
-### Battery level indicator (if device supports it)
-If the ESP8266 firmware can report a battery ADC reading, surfacing a battery level icon in the header would help users know when to recharge the device before a long cook.
-
-### Multiple probe support
-The current UI is hardcoded to exactly two probes (Meat, Grill). Designing the probe grid to dynamically render N probe cards from a config array would future-proof the UI for multi-probe setups without a full rewrite.
-
-### Recipe / preset builder
-The current presets are hardcoded in JavaScript. A UI that lets users create and name their own presets (meat target + grill range + default cook name) would replace the need to re-enter the same targets for repeat cooks.
-
-### Quick temperature reference panel
-A collapsible reference table of common doneness temperatures (rare, medium-rare, well-done for various meats) accessible from the main screen — without leaving the live view — would reduce the need to look things up externally.
+### Notes cannot be edited or deleted [P3]
+Notes are appended to the cook's CSV as `#note` lines, so this is a firmware
+change (rewrite the file without the line) as much as a UI one. Worth having
+for typos, but only after the two items above.
 
 ---
 
-*Generated from a full codebase audit of `data/index.html`, `data/app.js`, `data/roadmap.js`, and `data/style.css`.*
+## 5. History
+
+### No filter or sort [P3]
+History is reverse-chronological only. As the list grows, a name search and a
+sort (date, duration, favourites first) would keep it usable. Purely
+client-side; the list is already in memory.
+
+### Cook comparison [P1]
+Overlaying two replay charts (this brisket vs last month's) is the single most
+useful thing history could do for improving technique. Pick two cooks, align
+on start time, draw both meat lines with the grill lines faded.
+
+### Cook export [P2]
+Every cook is already a CSV on the SD card. A download route in the firmware
+(e.g. `GET /api/cooks/<file>`) plus a "Download CSV" button in the detail view
+would let users back up and analyse cooks in a spreadsheet. Must be served in
+chunks; a whole file in one `String` will not fit in RAM.
+
+### History badge goes stale after a cook is stopped [P3]
+Stopping a cook adds it to the local history list, but the count on the
+History tab is only refreshed when the cook list is fetched on connect.
+Re-request the cook list (or bump the count) on `cook_stopped`.
+
+### Favourite star in the detail view is easy to miss [P3]
+The ★ in the detail header is small and borderless. A labelled pill
+("★ Favourite" / "★ Favourited") would be clearer, and its `aria-label`
+should change with state.
+
+---
+
+## 6. Accessibility
+
+### Settings sheet has no focus trap [P3]
+Tab can move focus from the sheet into the hidden dashboard behind it. Set
+`inert` on the main content while the sheet is open (or intercept Tab) so
+keyboard and screen-reader users stay inside the modal. The same applies to
+the Start/Stop Cook and history detail dialogs.
+
+### No visible focus ring on custom buttons [P3]
+Favourite rows, preset chips and history rows suppress the browser focus ring
+and provide none of their own, so keyboard users cannot see where they are. A
+`:focus-visible` outline in the accent colour fixes this globally.
+
+### Missing or static `aria-label`s [P3]
+- the detail-view ★ button is always labelled "Favourite" regardless of state;
+- the history sparklines and the live chart canvas have no accessible
+  description;
+- the favourite delete ✕ says "Delete" without naming which favourite.
+
+---
+
+## 7. Performance
+
+### Service worker for static assets [P2]
+The ESP8266 serves `index.html`, `app.js`, `roadmap.js`, `style.css` and a
+~200 KB Chart.js on every load, which is slow on a weak signal and competes
+with the WebSocket. A service worker that caches those files (never `/ws` or
+`/api/*`) would make reloads instant and let the dashboard shell open even
+when the device is briefly unreachable. Cache-bust on firmware version.
+
+---
+
+## 8. Larger changes
+
+### Multiple probe support [cant happen till i upate the hardware right now only 2 probes]
+Firmware, wiring and UI all hardcode exactly two probes. The ADS1115 has two
+spare channels (A2, A3) and the case has room for two more jacks. Rendering N
+probe cards from a config array, and generalising the tick payload, would
+allow a second meat probe. This touches everything (tick, cook CSV columns,
+calibration, chart) and should only be done once the two-probe version is
+stable.
+
+---
+
+## Removed on 2026-09-11
+
+Done already: favicon and manifest; fluid temperature font (`clamp()`);
+coloured connection pill; connecting / reconnecting state; stale and offline
+handling with banner; signal-strength icon; chart reference lines for targets;
+dual Y axis; real recorded data in the history replay; Chart.js self-hosted;
+system notification on target reached; calibration badges, validation and
+resume; start-cook dialog shows the targets it will use.
+
+Not worth it or wrong: light mode (marked ignore); undo toast for settings
+(the inputs stay visible, retype them); swipe between tabs (conflicts with the
+approved chart pan); chart loading skeleton; aggregate statistics; note
+export (covered by cook export); reset-to-defaults (delete the config files
+on the SD card); cook countdown (the ETA badge already does this); battery
+indicator (the device is USB powered); quick temperature reference (the
+preset chips are that); chart-resize debounce note (the code resizes rather
+than rebuilds); multi-device conflict "merge strategy" (rewritten as the
+tick-sync item in §2, which is the actual gap).
