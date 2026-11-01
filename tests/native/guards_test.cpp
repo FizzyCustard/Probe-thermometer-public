@@ -58,6 +58,9 @@ int main() {
   for (int i = 0; i < 500; i++) if (takeNoteSlot(taken, 100)) kept++;
   CHECK(kept == 100);
 
+  CHECK(strcmp(fileBasename("/BBQ/cooks/cook_a.csv"), "cook_a.csv") == 0);
+  CHECK(strcmp(fileBasename("cook_a.csv"), "cook_a.csv") == 0);
+
   // Default coefficients give a sane reading for a sane resistance
   float c = resistanceToCelsius(100000.0f, 0);
   CHECK(isfinite(c) && c > -50 && c < 120);

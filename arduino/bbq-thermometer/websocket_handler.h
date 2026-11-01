@@ -130,10 +130,13 @@ void onWsMessage(AsyncWebSocketClient* client, const char* data, size_t len) {
       strlcpy(ts, doc["ts"] | "unknown", sizeof(ts));
       csvSanitize(ts);   // browser-supplied — keep it from corrupting the CSV footer
     }
+    // Copied first: cookStop() ends the session this name belongs to.
+    String file = activeCook.active ? String(fileBasename(activeCook.filename)) : String();
     cookStop(ts);
 
     JsonDocument resp;
     resp["type"] = "cook_stopped";
+    if (file.length()) resp["file"] = file;
     String out;
     serializeJson(resp, out);
     client->text(out);

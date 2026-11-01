@@ -58,6 +58,12 @@ inline bool takeNoteSlot(uint16_t& taken, uint16_t max) {
   return true;
 }
 
+// Last path segment: the name a cook file goes by in the cook_list message.
+inline const char* fileBasename(const char* path) {
+  const char* slash = strrchr(path, '/');
+  return slash ? slash + 1 : path;
+}
+
 // Compile-time string compare, for rejecting config.h placeholders.
 constexpr bool sameStr(const char* a, const char* b) {
   return *a == *b && (*a == '\0' || sameStr(a + 1, b + 1));

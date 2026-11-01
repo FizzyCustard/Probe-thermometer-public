@@ -555,8 +555,7 @@ function connectWS() {
     if (data.type === 'wifi_testing')  { handleWifiTesting(data);   return; }
     if (data.type === 'fav_result')    { handleFavResult(data);     return; }
     if (data.type === 'cook_started') return;
-    // The device only now knows the cook's file name; History needs it to replay.
-    if (data.type === 'cook_stopped') { wsSend({ type: 'request_cook_list' }); return; }
+    if (data.type === 'cook_stopped')  { handleCookStopped(data);   return; }
 
     if (!data.meat || !data.grill) return;
 
@@ -708,11 +707,21 @@ function handleCookData(data) {
   }
 }
 
+// History entries need the device's file name to replay, which the browser only
+// learns here. Re-keying the session lets handleCookList() find it again.
+function handleCookStopped(data) {
+  const s = window.__cookState;
+  if (s && s.justStopped && data.file) s.justStopped.id = data.file;
+  if (s) s.justStopped = null;
+  wsSend({ type: 'request_cook_list' });
+}
+
 function handleCookList(data) {
   if (!window.__cookState || !Array.isArray(data.cooks)) return;
   // Firmware caps the list to keep the payload inside the ESP8266's heap and
   // sends truncated:true when older cooks were left off.
   window.__cookState.historyTruncated = data.truncated === true;
+  const known = new Map(window.__cookState.history.map(c => [c.id, c]));
   window.__cookState.history = data.cooks.map(c => ({
     id:         c.file,
     name:       c.name   || c.file,
@@ -736,18 +745,15 @@ function handleCookList(data) {
     favourite:    false,
   }));
 
-  // The list has no stats of its own; keep what was worked out at stop time.
-  const stopped = window.__cookState.justStopped;
-  if (stopped) {
-    window.__cookState.justStopped = null;
-    const cook = window.__cookState.history.find(c => c.name === stopped.name);
-    if (cook) {
-      cook.peakMeat     = stopped.peakMeat;
-      cook.peakGrill    = stopped.peakGrill;
-      cook.targetHitMin = stopped.targetHitMin;
-      cook.favourite    = stopped.favourite;
-    }
-  }
+  // The list has no stats of its own; keep what this page already worked out.
+  window.__cookState.history.forEach(c => {
+    const prev = known.get(c.id);
+    if (!prev) return;
+    c.peakMeat     = prev.peakMeat;
+    c.peakGrill    = prev.peakGrill;
+    c.targetHitMin = prev.targetHitMin;
+    c.favourite    = prev.favourite;
+  });
 
   if (typeof renderHistoryList === 'function') renderHistoryList();
   const el = document.getElementById('tab-history-count');

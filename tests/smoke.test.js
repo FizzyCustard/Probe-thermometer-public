@@ -32,10 +32,11 @@ const CONFIG = {
   favourites: [{ id: "x');window.__xss=1;//", name: 'Odd id', meat_target: 74, grill_low: 160, grill_high: 200, preset: '' }],
 };
 let cookActive = false;
+const cooks = [];
 const tick = (meat, grill) => ({
   type: 'tick', ts: '2026-11-01T12:00:00',
   meat: { c: meat, r: 7500 }, grill: { c: grill, r: 3900 },
-  sd: true, cook_active: cookActive, cook_name: cookActive ? 'Test cook' : undefined,
+  sd: true, cook_active: cookActive, cook_name: cookActive ? cooks[0].name : undefined,
 });
 
 (async () => {
@@ -57,12 +58,12 @@ const tick = (meat, grill) => ({
       sent.push(msg);
       if (msg.type === 'cook_start') cookActive = true;
       if (msg.type === 'cook_stop') cookActive = false;
-      if (msg.type === 'cook_stop') ws.send(JSON.stringify({ type: 'cook_stopped' }));
-      if (msg.type === 'request_cook_list' && sent.some(m => m.type === 'cook_stop')) {
-        ws.send(JSON.stringify({ type: 'cook_list', cooks: [
-          { file: 'cook_2026-11-01T12-00-00.csv', name: 'Test cook', started_at: '2026-11-01T12:00:00', duration_s: 60 },
-        ] }));
+      if (msg.type === 'cook_start') {
+        // Like cookStart(): one file per cook, commas stored as semicolons
+        cooks.unshift({ file: `cook_${cooks.length + 1}.csv`, name: msg.name.replace(/,/g, ';'), duration_s: 60 });
       }
+      if (msg.type === 'cook_stop') ws.send(JSON.stringify({ type: 'cook_stopped', file: cooks[0].file }));
+      if (msg.type === 'request_cook_list') ws.send(JSON.stringify({ type: 'cook_list', cooks }));
     });
     ws.send(JSON.stringify(CONFIG));
   });
@@ -131,7 +132,7 @@ const tick = (meat, grill) => ({
   check('start dialog shows the food-safety note',
     await page.locator('.dialog-disclaimer').isVisible());
   await page.evaluate(() => {
-    document.getElementById('start-cook-name').value = 'Test cook';
+    document.getElementById('start-cook-name').value = 'Ribs, Sunday';
     confirmStartCook();
   });
   await page.waitForTimeout(50);
@@ -140,13 +141,25 @@ const tick = (meat, grill) => ({
   await push(65, 170);   // ...then rests back below it
   await push(null, 170); // ...and the probe drops out
   await page.evaluate(() => confirmStopCook(false));
-  await page.waitForFunction(() => window.__cookState.history[0]?.id?.startsWith('cook_'));
+  await page.waitForFunction(() => window.__cookState.history[0]?.id === 'cook_1.csv');
   const cook = await page.evaluate(() => window.__cookState.history[0]);
-  check('stopping a cook picks up the device file name', cook.id === 'cook_2026-11-01T12-00-00.csv', cook.id);
+  check('stopping a cook picks up the device file name', cook.id === 'cook_1.csv', cook.id);
   check('target hit survives a later dip', cook.targetHitMin === 0, String(cook.targetHitMin));
   check('peak ignores the gaps', cook.peakMeat === 72, String(cook.peakMeat));
   const row = await page.evaluate(() => document.getElementById('history-list').textContent);
   check('history row shows the target was hit', row.includes('Target hit'), row);
+
+  await page.evaluate(() => {
+    openStartCookDialog();
+    document.getElementById('start-cook-name').value = 'Second cook';
+    confirmStartCook();
+  });
+  await page.waitForTimeout(50);
+  await push(40, 170);
+  await page.evaluate(() => confirmStopCook(false));
+  await page.waitForFunction(() => window.__cookState.history[0]?.id === 'cook_2.csv');
+  const earlier = await page.evaluate(() => window.__cookState.history[1]);
+  check('a later cook keeps earlier stats', earlier.targetHitMin === 0 && earlier.peakMeat === 72, JSON.stringify(earlier));
 
   // ── Untrusted device strings ─────────────────────────────────────────────
   await page.evaluate(() => renderFavourites());
