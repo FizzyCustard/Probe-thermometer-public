@@ -63,7 +63,7 @@ Option 2 is the real fix. Option 1 is a stopgap if a cook is imminent.
 OTA itself is confirmed working. The device advertises it correctly:
 
 ```
-_arduino._tcp on bbq.local / 192.168.4.118
+_arduino._tcp on bbq.local / <device-ip>
 port = 8266
 txt  = ["auth_upload=yes" "board=d1_mini" "ssh_upload=no" "tcp_check=no"]
 ```
@@ -75,7 +75,7 @@ forwarding the port**:
 env.Execute("\"$PYTHONEXE\" -m platformio run -t uploadfs -e %s" % env["PIOENV"])
 ```
 
-So after `pio run -t upload --upload-port 192.168.4.118`, the firmware goes over
+So after `pio run -t upload --upload-port <device-ip>`, the firmware goes over
 the air as intended, then `uploadfs` runs with no port and falls back to
 auto-detecting a **serial** one:
 
@@ -97,10 +97,6 @@ def upload_filesystem(source, target, env):
 
 ### Related, while in here
 
-- **`OTA_PASSWORD` is still the shipped default `"bbq-update"`.** It *is*
-  enforced — `bbq-thermometer.ino:146` calls `ArduinoOTA.setPassword()` and the
-  mDNS record shows `auth_upload=yes` — but anyone on the LAN who knows the
-  default can push firmware to the device. Worth changing on the next flash.
 - **An OTA filesystem upload wipes `/wifi.json`**, same as a serial one, because
   it rewrites all of LittleFS. Recovery is automatic now that real credentials
   are compiled into `config.h` (`bbq-thermometer.ino:124-127` re-saves them on

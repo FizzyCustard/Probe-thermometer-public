@@ -8,13 +8,8 @@ A wireless BBQ thermometer system built on an ESP8266 D1 Mini. Two NTC thermisto
 
 ## Software
 
-- We want to make sure we are using coding best practices.
-- We have to make sure we are not going to have any techical debt
-- We should be proud of this code it should be seen as well thought out and put together projject
-
 **`device/data/` is the web interface — the single source of truth, served
-from LittleFS on the device. (The Netlify demo site that used to live in
-`data/` has been removed; the live device replaces it.)**
+from LittleFS on the device.**
 
 ---
 
@@ -25,7 +20,7 @@ from LittleFS on the device. (The Netlify demo site that used to live in
 | Component | Detail |
 |---|---|
 | **MCU** | AZDelivery D1 Mini (ESP8266-12F) |
-| **Flash** | 4MB onboard (SPIFFS for web UI files) |
+| **Flash** | 4MB onboard (LittleFS for web UI files) |
 | **WiFi** | 802.11 b/g/n, 2.4GHz |
 | **Power** | USB or battery pack via onboard regulator |
 
@@ -99,16 +94,16 @@ The 3.5mm jack Tip carries the thermistor signal; Sleeve is GND.
 | `ESPAsyncWebServer` | Async HTTP + WebSocket server |
 | `Adafruit_ADS1X15` | ADS1115 driver |
 | `SD` | SD card read/write |
-| `LittleFS` / `SPIFFS` | Serve web UI files from flash |
+| `LittleFS` | Serve web UI files from flash |
 | `ArduinoJson` | JSON serialisation for WebSocket messages |
 | `TimeLib` / NTP | Timestamps (sync via NTP on boot) |
 
 ### Core Loop
 
-1. On boot: connect to WiFi, sync time via NTP, mount SPIFFS and SD card, start web server and WebSocket handler.
+1. On boot: connect to WiFi, sync time via NTP, mount LittleFS and SD card, start web server and WebSocket handler.
 2. Every **1 second**: read both ADS1115 channels, convert resistance → °C using Steinhart-Hart equation, push JSON payload to all connected WebSocket clients.
 3. Every **5 seconds**: append a CSV row to the SD card log file.
-4. Web server serves static UI files from SPIFFS on port 80.
+4. Web server serves static UI files from LittleFS on port 80.
 
 ### Temperature Conversion
 
@@ -270,7 +265,7 @@ Any device on the same WiFi network opens `http://<device-ip>` in a browser. No 
 
 ### Graph
 
-- Rendered with **Chart.js** (served from SPIFFS, no CDN dependency).
+- Rendered with **Chart.js** (served from LittleFS, no CDN dependency).
 - X-axis: rolling 60-minute window.
 - Two lines: meat (pink) and grill (white).
 - Target meat temp shown as a dashed pink horizontal line.
@@ -280,7 +275,7 @@ Any device on the same WiFi network opens `http://<device-ip>` in a browser. No 
 
 ## File Structure
 
-### SPIFFS (onboard flash — web UI)
+### LittleFS (onboard flash — web UI)
 
 ```
 /data
@@ -321,7 +316,7 @@ Any device on the same WiFi network opens `http://<device-ip>` in a browser. No 
 
 - Configured via the web UI, not hardcoded in firmware.
 - Settings sent from browser to ESP8266 via WebSocket message on change.
-- Stored in firmware memory (not persisted across power cycles in v1 — EEPROM persistence is a future enhancement).
+- Saved to the SD card (`/BBQ/config/settings.csv`) on every change and reloaded on boot.
 
 ---
 
@@ -338,12 +333,9 @@ Any device on the same WiFi network opens `http://<device-ip>` in a browser. No 
 
 | Item | Status |
 |---|---|
-| Target settings persist across reboot | v2 — EEPROM/NVS |
 | Push notifications (phone, browser push API) | v2 — requires HTTPS + service worker |
 | More than 2 probes | v2 — ADS1115 has 2 spare channels |
-| OTA firmware updates | v2 |
 | Historical log viewer in UI | v2 |
-| Custom device name / mDNS (`bbq.local`) | v2 |
 | PCB design | v3 |
 
 ---

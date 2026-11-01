@@ -8,9 +8,6 @@
 
 #define WIFI_CREDS_PATH       "/wifi.json"
 #define AP_SSID               "BBQ-Thermometer"
-#ifndef AP_PASSWORD
-#define AP_PASSWORD           "bbq-setup"     // WPA2 needs >= 8 chars
-#endif
 #define WIFI_CONNECT_TIMEOUT  15000UL
 #define STA_TEST_TIMEOUT      20000UL
 #define STA_RETRY_INTERVAL    60000UL   // background retry of saved creds in AP mode
@@ -141,8 +138,7 @@ void startAP() {
   WiFi.softAP(AP_SSID, AP_PASSWORD);
   IPAddress apIP = WiFi.softAPIP();
   dnsServer.start(53, "*", apIP);
-  Serial.printf("AP mode — SSID: %s  password: %s  IP: %s\n",
-                AP_SSID, AP_PASSWORD, apIP.toString().c_str());
+  Serial.printf("AP mode — SSID: %s  IP: %s\n", AP_SSID, apIP.toString().c_str());
   Serial.println("Connect your phone to BBQ-Thermometer to configure WiFi.");
 }
 

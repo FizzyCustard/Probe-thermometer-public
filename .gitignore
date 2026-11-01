@@ -6,6 +6,16 @@
 # config.example.h holds placeholders only and stays tracked.
 config.h
 config.h.*
+!tests/native/stubs/config.h
 
 # PlatformIO build artifacts — generated locally, not for version control
 .pio/
+
+# Local editor and tool state
+.vscode/
+.claude/
+.DS_Store
+
+# Node dependencies for the browser tests
+node_modules/
+package-lock.json

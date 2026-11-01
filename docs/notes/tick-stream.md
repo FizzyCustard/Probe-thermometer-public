@@ -4,8 +4,8 @@
 "Fix applied" at the bottom.
 
 **Date found:** 2026-09-06
-**Device:** BBQ Monitor, `http://bbq.local/` (192.168.4.118)
-**Discovered via:** Hermes watcher skill (`~/.hermes/skills/home-automation/bbq-monitor/`)
+**Device:** BBQ Monitor, `http://bbq.local/` (<device-ip>)
+**Discovered via:** an external client polling the device
 
 ## Summary
 

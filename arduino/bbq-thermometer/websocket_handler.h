@@ -6,6 +6,7 @@
 #include "logger.h"
 #include "cook_session.h"
 #include "wifi_manager.h"
+#include "net_guards.h"
 #include "snapshot.h"
 
 extern AsyncWebSocket ws;
@@ -20,12 +21,6 @@ extern uint8_t   favCount;
 // Defined in the .ino — declared here so handlers can timestamp on-device.
 String getTimestamp();
 bool   ntpReady();
-
-// Settings sanity limits (°C)
-#define MEAT_TARGET_MIN    0.0f
-#define MEAT_TARGET_MAX  150.0f
-#define GRILL_RANGE_MIN    0.0f
-#define GRILL_RANGE_MAX  400.0f
 
 // Forward declarations
 static void sendConfig(AsyncWebSocketClient* client);
@@ -80,8 +75,7 @@ void onWsMessage(AsyncWebSocketClient* client, const char* data, size_t len) {
     float mt = doc["meat_target"].as<float>();
     float gl = doc["grill_low"].as<float>();
     float gh = doc["grill_high"].as<float>();
-    if (mt < MEAT_TARGET_MIN || mt > MEAT_TARGET_MAX) return;
-    if (gl < GRILL_RANGE_MIN || gh > GRILL_RANGE_MAX || gl >= gh) return;
+    if (!targetsValid(mt, gl, gh)) return;
     if (mt == meatTarget && gl == grillLow && gh == grillHigh) return;  // no change — skip the SD write
 
     meatTarget = mt;
@@ -115,7 +109,8 @@ void onWsMessage(AsyncWebSocketClient* client, const char* data, size_t len) {
       strlcpy(ts, ok ? bts : "unknown", sizeof(ts));
     }
 
-    bool started = cookStart(name, preset, mt, gl, gh, ts);
+    bool started = targetsValid(mt, gl, gh) &&
+                   cookStart(name, preset, mt, gl, gh, ts);
 
     JsonDocument resp;
     resp["type"]    = "cook_started";
@@ -135,10 +130,13 @@ void onWsMessage(AsyncWebSocketClient* client, const char* data, size_t len) {
       strlcpy(ts, doc["ts"] | "unknown", sizeof(ts));
       csvSanitize(ts);   // browser-supplied — keep it from corrupting the CSV footer
     }
+    // Copied first: cookStop() ends the session this name belongs to.
+    String file = activeCook.active ? String(fileBasename(activeCook.filename)) : String();
     cookStop(ts);
 
     JsonDocument resp;
     resp["type"] = "cook_stopped";
+    if (file.length()) resp["file"] = file;
     String out;
     serializeJson(resp, out);
     client->text(out);
@@ -157,7 +155,11 @@ void onWsMessage(AsyncWebSocketClient* client, const char* data, size_t len) {
   // ── Favourite: save / update ──────────────────────────────────────────────
   if (strcmp(type, "fav_save") == 0) {
     const char* id = doc["id"] | "";
-    if (strlen(id) == 0) return;
+    if (!isSafeFavId(id)) return;
+    float favMeat = doc["meat_target"].as<float>();
+    float favLow  = doc["grill_low"].as<float>();
+    float favHigh = doc["grill_high"].as<float>();
+    if (!targetsValid(favMeat, favLow, favHigh)) return;
 
     // Find existing entry to update, or append
     int idx = -1;
@@ -183,9 +185,9 @@ void onWsMessage(AsyncWebSocketClient* client, const char* data, size_t len) {
     strlcpy(favs[idx].preset, doc["preset"] | "",            sizeof(favs[idx].preset));
     csvSanitize(favs[idx].name);
     csvSanitize(favs[idx].preset);
-    favs[idx].meatTarget = doc["meat_target"].as<float>();
-    favs[idx].grillLow   = doc["grill_low"].as<float>();
-    favs[idx].grillHigh  = doc["grill_high"].as<float>();
+    favs[idx].meatTarget = favMeat;
+    favs[idx].grillLow   = favLow;
+    favs[idx].grillHigh  = favHigh;
     saveFavourites(favs, favCount);
 
     sendConfig(client);
@@ -369,7 +371,21 @@ static void cookListParseLine(const String& line, JsonObject& cook,
   }
 }
 
-// Build the cook history list (metadata for every cook file) and send it.
+// Build the cook history list and send it — newest cooks first, capped.
+//
+// The cap is not optional: the response is built as a JsonDocument, serialised
+// into a String, then queued by the WS layer — three copies live at peak, and
+// every finished cook adds an entry forever. Without a limit a well-used card
+// starves the heap and resets the board. (sendCookData() bounds itself the same
+// way with MAX_POINTS.)
+//
+// Cook files are named cook_<ISO timestamp>.csv, so lexicographic order IS
+// chronological order and the newest cooks are the largest names. Pass 1 reads
+// directory entries only — no file opens — and keeps just the newest
+// MAX_COOK_LIST names; pass 2 then parses those files and nothing else, which
+// also makes this cheaper than the old scan-everything loop once the card fills
+// up. A cook started before the clock syncs is named cook_unknown*.csv, which
+// sorts after any timestamp and is therefore always kept.
 //
 // Large files are NOT read end-to-end: the header block lives in the first few
 // hundred bytes and the footer/last-sample in the last few hundred, so we read
@@ -378,61 +394,102 @@ static void cookListParseLine(const String& line, JsonObject& cook,
 static void sendCookList(AsyncWebSocketClient* client) {
   const size_t CHUNK = 768;
 
-  JsonDocument resp;
-  resp["type"] = "cook_list";
-  JsonArray arr = resp["cooks"].to<JsonArray>();
+  // 30 names x 40 bytes of BSS, traded against an unbounded heap spike. Longer
+  // names cannot be ours (cookStart() generates at most 31 chars) so they are
+  // skipped rather than silently truncated into a path that will not open.
+  const uint8_t MAX_COOK_LIST = 30;
+  const uint8_t COOK_NAME_MAX = 40;
+  static char recent[MAX_COOK_LIST][COOK_NAME_MAX];
+  uint8_t count     = 0;   // entries in `recent`, ascending (oldest at [0])
+  bool    truncated = false;
 
+  // ── Pass 1: pick the newest MAX_COOK_LIST filenames ────────────────────────
   File dir = SD.open(BBQ_COOKS);
   if (dir) {
     while (true) {
       File entry = dir.openNextFile();
       if (!entry) break;
-      if (entry.isDirectory()) { entry.close(); continue; }
-
-      String fname = String(entry.name());
+      bool   isDir = entry.isDirectory();
+      String fname = isDir ? String() : String(entry.name());
       entry.close();
+      if (isDir) continue;
       if (!fname.startsWith("cook_") || !fname.endsWith(".csv")) continue;
+      if (fname.length() >= COOK_NAME_MAX) continue;
 
-      String fullPath = String(BBQ_COOKS) + "/" + fname;
-      File f = SD.open(fullPath.c_str(), FILE_READ);
-      if (!f) continue;
+      const char* cand = fname.c_str();
 
-      JsonObject cook = arr.add<JsonObject>();
-      cook["file"] = fname;
-      uint32_t lastElapsed = 0;
-      bool     stopped     = false;
-      size_t   size        = f.size();
-
-      if (size <= 2 * CHUNK) {
-        // Small file — scan everything
-        while (f.available()) {
-          String line = f.readStringUntil('\n');
-          line.trim();
-          cookListParseLine(line, cook, lastElapsed, stopped);
+      if (count < MAX_COOK_LIST) {
+        // Room left: insertion-sort `cand` into the window.
+        uint8_t i = count;
+        while (i > 0 && strcmp(recent[i - 1], cand) > 0) {
+          memcpy(recent[i], recent[i - 1], COOK_NAME_MAX);
+          i--;
         }
+        strlcpy(recent[i], cand, COOK_NAME_MAX);
+        count++;
+      } else if (strcmp(cand, recent[0]) > 0) {
+        // Window full and `cand` is newer than the oldest kept — evict [0].
+        truncated = true;
+        uint8_t i = 0;
+        while (i + 1 < MAX_COOK_LIST && strcmp(recent[i + 1], cand) < 0) {
+          memcpy(recent[i], recent[i + 1], COOK_NAME_MAX);
+          i++;
+        }
+        strlcpy(recent[i], cand, COOK_NAME_MAX);
       } else {
-        // Head chunk: metadata header block ends at the CSV column row
-        while (f.available() && f.position() < CHUNK) {
-          String line = f.readStringUntil('\n');
-          line.trim();
-          if (line.startsWith("elapsed")) break;
-          cookListParseLine(line, cook, lastElapsed, stopped);
-        }
-        // Tail chunk: last sample row and (if the cook finished) #stopped_at
-        f.seek(size - CHUNK);
-        f.readStringUntil('\n');  // discard the partial line at the seek point
-        while (f.available()) {
-          String line = f.readStringUntil('\n');
-          line.trim();
-          cookListParseLine(line, cook, lastElapsed, stopped);
-        }
+        truncated = true;   // older than everything we are keeping
       }
-      f.close();
-
-      if (!stopped) cook["duration_s"] = lastElapsed;
-      yield();   // keep WiFi + watchdog fed between files
+      yield();
     }
     dir.close();
+  }
+
+  JsonDocument resp;
+  resp["type"] = "cook_list";
+  if (truncated) resp["truncated"] = true;
+  JsonArray arr = resp["cooks"].to<JsonArray>();
+
+  // ── Pass 2: parse the kept files, newest first ─────────────────────────────
+  for (int8_t idx = (int8_t)count - 1; idx >= 0; idx--) {
+    String fname    = String(recent[idx]);
+    String fullPath = String(BBQ_COOKS) + "/" + fname;
+    File f = SD.open(fullPath.c_str(), FILE_READ);
+    if (!f) continue;
+
+    JsonObject cook = arr.add<JsonObject>();
+    cook["file"] = fname;
+    uint32_t lastElapsed = 0;
+    bool     stopped     = false;
+    size_t   size        = f.size();
+
+    if (size <= 2 * CHUNK) {
+      // Small file — scan everything
+      while (f.available()) {
+        String line = f.readStringUntil('\n');
+        line.trim();
+        cookListParseLine(line, cook, lastElapsed, stopped);
+      }
+    } else {
+      // Head chunk: metadata header block ends at the CSV column row
+      while (f.available() && f.position() < CHUNK) {
+        String line = f.readStringUntil('\n');
+        line.trim();
+        if (line.startsWith("elapsed")) break;
+        cookListParseLine(line, cook, lastElapsed, stopped);
+      }
+      // Tail chunk: last sample row and (if the cook finished) #stopped_at
+      f.seek(size - CHUNK);
+      f.readStringUntil('\n');  // discard the partial line at the seek point
+      while (f.available()) {
+        String line = f.readStringUntil('\n');
+        line.trim();
+        cookListParseLine(line, cook, lastElapsed, stopped);
+      }
+    }
+    f.close();
+
+    if (!stopped) cook["duration_s"] = lastElapsed;
+    yield();   // keep WiFi + watchdog fed between files
   }
 
   String out;
@@ -463,7 +520,10 @@ static void sendCookData(AsyncWebSocketClient* client, const char* file) {
   // 150 points is plenty at phone-chart resolution and keeps the JSON payload
   // well inside the ESP8266's heap headroom (this doc is built, serialised to
   // a String, then queued by the WS layer — three copies at peak).
+  // Notes need the same bound: nothing limits how many a cook can collect.
   const uint32_t MAX_POINTS = 150;
+  const uint16_t MAX_NOTES  = 100;
+  uint16_t notesTaken = 0;
   uint32_t stride = (dataRows + MAX_POINTS - 1) / MAX_POINTS;
   if (stride < 1) stride = 1;
 
@@ -489,7 +549,7 @@ static void sendCookData(AsyncWebSocketClient* client, const char* file) {
       // #note,<elapsed_s>,<text>,<meat_c>  — text may contain commas
       int c1   = line.indexOf(',', 6);
       int last = line.lastIndexOf(',');
-      if (c1 > 6 && last > c1) {
+      if (c1 > 6 && last > c1 && takeNoteSlot(notesTaken, MAX_NOTES)) {
         JsonObject n = notes.add<JsonObject>();
         n["ts"]   = (uint32_t)line.substring(6, c1).toInt();
         n["text"] = line.substring(c1 + 1, last);
@@ -770,6 +830,11 @@ void onWsEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
 }
 
 void wsBegin(AsyncWebServer* server) {
+  ws.handleHandshake([](AsyncWebServerRequest* req) {
+    const AsyncWebHeader* origin = req->getHeader("Origin");
+    return originMatchesHost(origin ? origin->value().c_str() : nullptr,
+                             req->host().c_str());
+  });
   ws.onEvent(onWsEvent);
   server->addHandler(&ws);
 }

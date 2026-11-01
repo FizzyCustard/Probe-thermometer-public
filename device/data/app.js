@@ -5,7 +5,8 @@ const fToC = f => (f - 32) * 5 / 9;
 // State
 let unit = localStorage.getItem('bbq_unit') || 'C';
 let settings = { meatTarget: 74, grillLow: 160, grillHigh: 200 };
-let meatHistory = []; // { ts: Date, c: number }
+// Kept index-aligned for the chart: a disconnected probe stores c: null.
+let meatHistory = []; // { ts: Date, c: number | null }
 let grillHistory = [];
 let alertFired = false;
 let chart;
@@ -13,7 +14,10 @@ let chart;
 // ── Display helpers ─────────────────────────────────────────────────────────
 
 function unitLabel() { return unit === 'F' ? '°F' : '°C'; }
-function toDisplay(c) { return unit === 'F' ? cToF(c) : c; }
+function toDisplay(c) {
+  if (c == null) return null;
+  return unit === 'F' ? cToF(c) : c;
+}
 function fmt(c, dp = 1) { return toDisplay(c).toFixed(dp); }
 function fmtWithUnit(c, dp = 1) { return fmt(c, dp) + unitLabel(); }
 
@@ -190,7 +194,7 @@ function appendChartPoint(meatC, grillC) {
 
 function calcETA(currentC) {
   if (currentC >= settings.meatTarget) return 0;
-  const recent = meatHistory.slice(-20); // last ~10 min of 30-s samples
+  const recent = meatHistory.slice(-20).filter(d => d.c != null); // last ~10 min of 30-s samples
   if (recent.length < 4) return null;
   const t0 = recent[0].ts.getTime();
   const n = recent.length;
@@ -240,6 +244,11 @@ function updateUI(meatC, grillC) {
       document.getElementById('meat-pill').className = 'status-pill reached';
       showBanner('Target temperature reached — time to check the meat!');
       showMeatTargetNotification(settings.meatTarget, unit);
+    }
+
+    const cook = window.__cookState;
+    if (meatC >= meatTarget && cook && cook.active && !cook.targetHitAt && !calIsOpen()) {
+      cook.targetHitAt = Date.now();
     }
   } else {
     document.getElementById('meat-temp').textContent = '--';
@@ -379,14 +388,35 @@ function syncSettingsInputs() {
   });
 }
 
+// Mirrors targetsValid() in net_guards.h. The device silently drops values
+// outside these limits, so catch them here where the user can be told.
+// An inverted range would also make updateUI() read every grill temperature as
+// in-range.
+function targetsError(meatC, lowC, highC) {
+  if (meatC < 0 || meatC > 150) return `Meat target must be between ${fmtWithUnit(0, 0)} and ${fmtWithUnit(150, 0)}.`;
+  if (lowC < 0 || highC > 400) return `Grill range must be between ${fmtWithUnit(0, 0)} and ${fmtWithUnit(400, 0)}.`;
+  if (lowC >= highC) return 'Grill low must be below grill high.';
+  return null;
+}
+
 function applySettings() {
   const rawMeat = parseFloat(document.getElementById('s-meat').value);
   const rawLow  = parseFloat(document.getElementById('s-grill-low').value);
   const rawHigh = parseFloat(document.getElementById('s-grill-high').value);
   if ([rawMeat, rawLow, rawHigh].some(isNaN)) return;
-  settings.meatTarget = unit === 'F' ? fToC(rawMeat) : rawMeat;
-  settings.grillLow   = unit === 'F' ? fToC(rawLow)  : rawLow;
-  settings.grillHigh  = unit === 'F' ? fToC(rawHigh) : rawHigh;
+
+  const meatC = unit === 'F' ? fToC(rawMeat) : rawMeat;
+  const lowC  = unit === 'F' ? fToC(rawLow)  : rawLow;
+  const highC = unit === 'F' ? fToC(rawHigh) : rawHigh;
+  const err = targetsError(meatC, lowC, highC);
+  if (err) {
+    alert(err);
+    return;
+  }
+
+  settings.meatTarget = meatC;
+  settings.grillLow   = lowC;
+  settings.grillHigh  = highC;
   sendSettings(); // push to device if connected
 
   // Reset meat alert so it can fire again against the new target
@@ -524,7 +554,8 @@ function connectWS() {
     if (data.type === 'wifi_saved')    { handleWifiSaved(data);     return; }
     if (data.type === 'wifi_testing')  { handleWifiTesting(data);   return; }
     if (data.type === 'fav_result')    { handleFavResult(data);     return; }
-    if (data.type === 'cook_started' || data.type === 'cook_stopped') return;
+    if (data.type === 'cook_started') return;
+    if (data.type === 'cook_stopped')  { handleCookStopped(data);   return; }
 
     if (!data.meat || !data.grill) return;
 
@@ -545,12 +576,12 @@ function connectWS() {
     // Raw resistances feed the calibration wizard's settling/capture buffers
     calFeed(meatC, data.meat.r, grillC, data.grill.r);
 
-    // Add a chart point every 30 s (only for connected probes)
+    // Add a chart point every 30 s
     if (now - lastChartAdd >= 30000) {
       lastChartAdd = now;
       const ts = new Date();
-      if (meatC  != null) meatHistory.push({ ts, c: meatC });
-      if (grillC != null) grillHistory.push({ ts, c: grillC });
+      meatHistory.push({ ts, c: meatC });
+      grillHistory.push({ ts, c: grillC });
       if (meatHistory.length  > 240) meatHistory.shift();
       if (grillHistory.length > 240) grillHistory.shift();
       appendChartPoint(meatC, grillC);
@@ -676,8 +707,21 @@ function handleCookData(data) {
   }
 }
 
+// History entries need the device's file name to replay, which the browser only
+// learns here. Re-keying the session lets handleCookList() find it again.
+function handleCookStopped(data) {
+  const s = window.__cookState;
+  if (s && s.justStopped && data.file) s.justStopped.id = data.file;
+  if (s) s.justStopped = null;
+  wsSend({ type: 'request_cook_list' });
+}
+
 function handleCookList(data) {
   if (!window.__cookState || !Array.isArray(data.cooks)) return;
+  // Firmware caps the list to keep the payload inside the ESP8266's heap and
+  // sends truncated:true when older cooks were left off.
+  window.__cookState.historyTruncated = data.truncated === true;
+  const known = new Map(window.__cookState.history.map(c => [c.id, c]));
   window.__cookState.history = data.cooks.map(c => ({
     id:         c.file,
     name:       c.name   || c.file,
@@ -700,6 +744,17 @@ function handleCookList(data) {
     notes:        [],
     favourite:    false,
   }));
+
+  // The list has no stats of its own; keep what this page already worked out.
+  window.__cookState.history.forEach(c => {
+    const prev = known.get(c.id);
+    if (!prev) return;
+    c.peakMeat     = prev.peakMeat;
+    c.peakGrill    = prev.peakGrill;
+    c.targetHitMin = prev.targetHitMin;
+    c.favourite    = prev.favourite;
+  });
+
   if (typeof renderHistoryList === 'function') renderHistoryList();
   const el = document.getElementById('tab-history-count');
   if (el) el.textContent = window.__cookState.history.length || '';
@@ -1100,7 +1155,7 @@ function calRenderReview() {
     if (res) {
       const text = res.saved   ? 'Saved to SD ✓'
                  : res.applied ? CAL_REASONS.sd_write_failed
-                 : `Rejected by device: ${CAL_REASONS[res.reason] || res.reason}`;
+                 : `Rejected by device: ${escapeHtml(CAL_REASONS[res.reason] || res.reason)}`;
       html += `<p class="cal-review-note ${res.saved ? 'ok' : 'error'}">${text}</p>`;
     }
 

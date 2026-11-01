@@ -36,6 +36,9 @@ window.__cookState = {
   preset: null,
   notes: [],          // [{ ts (seconds since cook start), text, system?, temp? }]
   history: [],   // populated from SD card via cook_list WS message
+  historyTruncated: false,  // firmware capped the list — older cooks not sent
+  targetHitAt: null,  // ms timestamp the active cook first reached its target
+  justStopped: null,  // session awaiting its device file name in the next cook_list
   favourites: [],     // populated from SD card via the config WS message
   selectedHistoryId: null,
   view: 'live',       // 'live' | 'history'
@@ -52,6 +55,14 @@ function formatDuration(seconds) {
   if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m`;
   if (m > 0) return `${m}m ${String(s).padStart(2, '0')}s`;
   return `${s}s`;
+}
+
+// Big stat cells render the unit in their own <span>, so the number must come
+// through bare - formatDuration()'s "1h 20m" would double the unit up as "1hh".
+function durationStatParts(seconds) {
+  if (seconds >= 3600) return { value: (seconds / 3600).toFixed(1), unit: 'h' };
+  if (seconds >= 60)   return { value: String(Math.floor(seconds / 60)), unit: 'm' };
+  return { value: String(Math.floor(seconds)), unit: 's' };
 }
 
 function formatRelDate(ts) {
@@ -184,9 +195,19 @@ function confirmStartCook() {
   const rawLow  = parseFloat(document.getElementById('start-grill-low').value);
   const rawHigh = parseFloat(document.getElementById('start-grill-high').value);
   if (![rawMeat, rawLow, rawHigh].some(isNaN)) {
-    settings.meatTarget = unit === 'F' ? fToC(rawMeat) : rawMeat;
-    settings.grillLow   = unit === 'F' ? fToC(rawLow)  : rawLow;
-    settings.grillHigh  = unit === 'F' ? fToC(rawHigh) : rawHigh;
+    const meatC = unit === 'F' ? fToC(rawMeat) : rawMeat;
+    const lowC  = unit === 'F' ? fToC(rawLow)  : rawLow;
+    const highC = unit === 'F' ? fToC(rawHigh) : rawHigh;
+    // Block the start rather than log a whole cook against bad targets.
+    const err = targetsError(meatC, lowC, highC);
+    if (err) {
+      alert(err);
+      return;
+    }
+
+    settings.meatTarget = meatC;
+    settings.grillLow   = lowC;
+    settings.grillHigh  = highC;
     
     if (window.__cookState.preset) {
       const p = window.__presets.find(x => x.name === window.__cookState.preset);
@@ -201,6 +222,7 @@ function confirmStartCook() {
   // Reset chart — fresh slate for this cook
   meatHistory.length  = 0;
   grillHistory.length = 0;
+  window.__cookState.targetHitAt = null;
   rebuildChart();
   alertFired = false;
 
@@ -241,14 +263,20 @@ function closeStopCookDialog() {
 }
 window.closeStopCookDialog = closeStopCookDialog;
 
+// Chart history holds null for a disconnected probe; stats want real values.
+function readings(history) {
+  return history.map(d => d.c).filter(c => c != null);
+}
+
 function confirmStopCook(saveAsFavourite) {
   const s = window.__cookState;
   if (!s.active) return;
   const duration = Math.floor((Date.now() - s.startedAt) / 1000);
-  const lastMeat  = meatHistory.length  ? meatHistory[meatHistory.length - 1].c  : null;
-  const lastGrill = grillHistory.length ? grillHistory[grillHistory.length - 1].c : null;
-  const peakMeat  = meatHistory.length  ? Math.max(...meatHistory.map(d => d.c))  : null;
-  const peakGrill = grillHistory.length ? Math.max(...grillHistory.map(d => d.c)) : null;
+  const meatC  = readings(meatHistory);
+  const grillC = readings(grillHistory);
+  const lastMeat  = meatC.length  ? meatC[meatC.length - 1]   : null;
+  const peakMeat  = meatC.length  ? Math.max(...meatC)  : null;
+  const peakGrill = grillC.length ? Math.max(...grillC) : null;
 
   const session = {
     id: 'c-' + Date.now(),
@@ -259,11 +287,14 @@ function confirmStopCook(saveAsFavourite) {
     targets: { ...settings },
     peakMeat:  peakMeat  != null ? Math.round(peakMeat  * 10) / 10 : null,
     peakGrill: peakGrill != null ? Math.round(peakGrill * 10) / 10 : null,
-    targetHitMin: lastMeat >= settings.meatTarget ? Math.floor(duration / 60) : null,
+    targetHitMin: s.targetHitAt ? Math.floor((s.targetHitAt - s.startedAt) / 60000)
+                : lastMeat >= settings.meatTarget ? Math.floor(duration / 60) : null,
     notes: s.notes.slice(),
     favourite: !!saveAsFavourite,
   };
   s.history.unshift(session);
+  s.justStopped = session;
+  s.targetHitAt = null;
 
   const stopTs = new Date().toISOString().replace(/\.\d{3}Z$/, '');
 
@@ -350,7 +381,8 @@ function addNote() {
   const s = window.__cookState;
   if (!s.active) return;
   const ts = Math.floor((Date.now() - s.startedAt) / 1000);
-  const lastMeat = meatHistory.length ? meatHistory[meatHistory.length - 1].c : null;
+  const meatC = readings(meatHistory);
+  const lastMeat = meatC.length ? meatC[meatC.length - 1] : null;
   s.notes.push({ ts, text, temp: lastMeat });
   wsSend({ type: 'cook_note', text, meat_c: lastMeat ?? 0 });
   input.value = '';
@@ -392,10 +424,12 @@ function renderFavourites() {
         <div class="fav-targets">${meat}°${unit} meat · ${lo}–${hi}°${unit} grill</div>
       </div>
       <div class="fav-actions">
-        <button class="fav-btn" onclick="loadFavourite('${f.id}', event)">Load</button>
-        <button class="fav-btn danger" onclick="deleteFavourite('${f.id}')" aria-label="Delete">✕</button>
+        <button class="fav-btn">Load</button>
+        <button class="fav-btn danger" aria-label="Delete">✕</button>
       </div>
     `;
+    row.querySelector('.fav-btn').onclick = e => loadFavourite(f.id, e);
+    row.querySelector('.fav-btn.danger').onclick = () => deleteFavourite(f.id);
     list.appendChild(row);
   });
 }
@@ -425,6 +459,7 @@ function loadFavourite(id, e) {
 window.loadFavourite = loadFavourite;
 
 function deleteFavourite(id) {
+  if (!confirm('Delete this favourite?')) return;
   window.__cookState.favourites = window.__cookState.favourites.filter(f => f.id !== id);
   wsSend({ type: 'fav_delete', id });
   renderFavourites();
@@ -501,15 +536,23 @@ function renderHistoryList() {
     row.onclick = () => openHistoryDetail(c.id);
     list.appendChild(row);
   });
+
+  if (s.historyTruncated) {
+    const notice = document.createElement('div');
+    notice.className = 'history-truncated';
+    notice.textContent = `Showing the ${s.history.length} most recent cooks — older files are still on the SD card.`;
+    list.appendChild(notice);
+  }
 }
 
 let detailReplayChart = null;
 
 function renderHistoryDetailStats(c) {
+  const dur = durationStatParts(c.duration);
   document.getElementById('detail-stats').innerHTML = `
     <div class="stat-cell">
       <span class="stat-label">Duration</span>
-      <span class="stat-value">${formatDuration(c.duration).split(' ')[0]}<span class="stat-unit">${c.duration >= 3600 ? 'h' : 'm'}</span></span>
+      <span class="stat-value">${dur.value}<span class="stat-unit">${dur.unit}</span></span>
     </div>
     <div class="stat-cell">
       <span class="stat-label">Peak meat</span>

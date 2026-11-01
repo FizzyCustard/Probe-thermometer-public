@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main, claude/bbq-thermometer-MAIN]
+  pull_request:
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install platformio
+      - name: Fill in the example config
+        run: sed 's/CHANGE_ME/ci-only-password/' arduino/bbq-thermometer/config.example.h > arduino/bbq-thermometer/config.h
+      - run: pio run
+
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install
+      - run: npx playwright-core install --with-deps chromium-headless-shell
+      - run: npm test
