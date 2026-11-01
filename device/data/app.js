@@ -735,9 +735,6 @@ function handleCookList(data) {
     notes:        [],
     favourite:    false,
   }));
-  if (typeof renderHistoryList === 'function') renderHistoryList();
-  const el = document.getElementById('tab-history-count');
-  if (el) el.textContent = window.__cookState.history.length || '';
 
   // The list has no stats of its own; keep what was worked out at stop time.
   const stopped = window.__cookState.justStopped;
@@ -751,6 +748,10 @@ function handleCookList(data) {
       cook.favourite    = stopped.favourite;
     }
   }
+
+  if (typeof renderHistoryList === 'function') renderHistoryList();
+  const el = document.getElementById('tab-history-count');
+  if (el) el.textContent = window.__cookState.history.length || '';
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────────

@@ -145,6 +145,8 @@ const tick = (meat, grill) => ({
   check('stopping a cook picks up the device file name', cook.id === 'cook_2026-11-01T12-00-00.csv', cook.id);
   check('target hit survives a later dip', cook.targetHitMin === 0, String(cook.targetHitMin));
   check('peak ignores the gaps', cook.peakMeat === 72, String(cook.peakMeat));
+  const row = await page.evaluate(() => document.getElementById('history-list').textContent);
+  check('history row shows the target was hit', row.includes('Target hit'), row);
 
   // ── Untrusted device strings ─────────────────────────────────────────────
   await page.evaluate(() => renderFavourites());
