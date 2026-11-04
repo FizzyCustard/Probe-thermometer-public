@@ -328,6 +328,11 @@ The collapsed header shows per-probe status from the `config` message:
 - Every **1 second**: read both probes → `wsBroadcast()`
 - Every **5 seconds**: `logReading()` → append CSV row
 - Every loop: `ws.cleanupClients()`
+- Every loop: `wsTick()` — does the work WebSocket messages queued. SD and
+  flash access blocks, so the async message handler never touches storage:
+  settings and favourites change in RAM and are saved here, cook start, note
+  and stop commands run here in the order they arrived (a 4-entry FIFO,
+  `deferred_queue.h`), and reads such as the cook list follow them
 
 ---
 
