@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BBQ thermometer enclosure concept</title>
+<style>
+*{box-sizing:border-box}body{margin:0;color:var(--foreground,#29323a);font-family:var(--font-sans,system-ui,sans-serif)}main{width:100%;max-width:728px;margin:0}section{margin:0 0 22px}h2{font-size:14px;letter-spacing:.08em;text-transform:uppercase;margin:12px 0 4px;font-weight:750}h2 span{color:var(--muted-foreground,#78838d);margin-right:8px}svg{display:block;width:100%;height:auto;overflow:visible}svg text{fill:var(--foreground,#29323a);font-family:var(--font-sans,system-ui,sans-serif);font-size:12px}.muted{fill:var(--muted-foreground,#78838d)}.line{fill:none;stroke:var(--muted-foreground,#78838d);stroke-width:1.2}.dash{stroke-dasharray:4 5}.board{fill:#258b87;stroke:#155c60;stroke-width:1.5}.orange{fill:#ff702d;stroke:#a93819;stroke-width:1.5}.dark{fill:#30343d;stroke:#181c24;stroke-width:1.5}.tiny{font-size:10px}.label{font-size:11px;font-weight:800;letter-spacing:1px}.mono{font-family:var(--font-mono,monospace);font-size:11px}p{font-size:11px;line-height:1.5;color:var(--muted-foreground,#78838d);margin:6px 0 16px}
+</style></head><body><main>
+<section><h2><span>01</span>Hot little box</h2>
+<svg viewBox="0 0 728 350" role="img" aria-label="Elongated ribbed orange enclosure with charcoal flame lid, cable-end jacks, charge port, switch and side SD slot">
+<path d="M159 145L293 212V320L159 253Z" class="orange"/><path d="M293 212L565 146V253L293 320Z" fill="#d94f22" stroke="#a93819" stroke-width="1.5"/>
+<path d="M159 135Q150 129 162 125L423 62Q432 60 441 65L565 126Q576 132 565 139L303 205Q294 208 285 203Z" class="dark"/>
+<path d="M158 142L288 209Q294 212 303 209L568 143" fill="none" stroke="#ffb36b" stroke-width="3"/>
+<!-- Ribs are interrupted around the side slot, with clear space at both ends. -->
+<g fill="none" stroke="#f77a38" stroke-width="6" stroke-linecap="round"><path d="M315 229V301M339 223V295M363 217V289M387 211V283M411 205V277M435 199V226M435 249V271M459 193V220M459 243V265M483 187V259M507 181V253M531 175V247M550 170V242"/></g>
+<path d="M420 236L474 223V230L420 243Z" fill="#171c24" stroke="#ff9b5b"/><path d="M434 237L461 231" stroke="#b8bfc5" stroke-width="2"/>
+<!-- Jacks share the top row across the cable-end short wall. -->
+<g fill="#babfc1" stroke="#252a32" stroke-width="3"><ellipse cx="188" cy="183" rx="10" ry="13" transform="rotate(27 188 183)"/><ellipse cx="253" cy="216" rx="10" ry="13" transform="rotate(27 253 216)"/></g><g fill="#121820"><ellipse cx="188" cy="183" rx="5" ry="8" transform="rotate(27 188 183)"/><ellipse cx="253" cy="216" rx="5" ry="8" transform="rotate(27 253 216)"/></g>
+<text x="173" y="211" transform="rotate(27 173 211)" style="fill:#923019;font-size:9px;font-weight:900">MEAT</text><text x="237" y="244" transform="rotate(27 237 244)" style="fill:#923019;font-size:9px;font-weight:900">GRILL</text>
+<path d="M176 230L208 246V256L176 240Z" fill="#181c24" stroke="#b9c1c7" stroke-width="2"/><path d="M242 264L267 277V285L242 272Z" fill="#181c24"/><path d="M251 269L258 273V280L251 276Z" fill="#b9c1c7"/>
+<path d="M335 151C299 137 319 122 335 112C338 128 352 119 360 96C387 116 414 121 405 136C397 152 362 161 335 151Z" fill="#c44020"/>
+<path d="M335 147C299 133 319 118 335 108C338 124 352 115 360 92C387 112 414 117 405 132C397 148 362 157 335 147Z" fill="#ff702d" stroke="#ffad57" stroke-width="1.5"/><path d="M350 140Q339 130 362 118Q362 131 376 132Q368 144 350 140Z" fill="#ffce69"/>
+<g fill="#a9aeb5" stroke="#171c24"><ellipse cx="181" cy="132" rx="5" ry="3"/><ellipse cx="541" cy="130" rx="5" ry="3"/></g>
+<text x="18" y="40" class="label">CHARCOAL + HOT ORANGE</text><text x="18" y="59" class="muted">PETG or ASA · solid raised ribs</text><path d="M179 65L234 109" class="line"/>
+<text x="586" y="204" class="label">SIDE SD SLOT</text><text x="586" y="222" class="tiny muted">Clear of ribs</text><path d="M579 208L477 230" class="line"/>
+<text x="586" y="273" class="muted">Lid seam</text><path d="M578 266L561 148" class="line"/>
+<text x="18" y="297" class="muted">Cable end ↗</text><text x="294" y="341" class="mono">≈70 L × 48 W × 40 H mm</text>
+</svg></section>
+<section><h2><span>02</span>Cable-end face</h2>
+<svg viewBox="0 0 728 290" role="img" aria-label="Cable end: top row MEAT and GRILL jacks; bottom row Charge / run micro-USB and Power switch; approximately 48 by 40 millimeters">
+<rect x="225" y="28" width="278" height="214" rx="24" class="orange"/><path d="M249 28H479Q503 28 503 52V61H225V52Q225 28 249 28Z" class="dark"/><path d="M226 64H502" stroke="#ffbe7c" stroke-width="2"/>
+<g fill="#a9aeb5" stroke="#1c2128"><circle cx="247" cy="46" r="4"/><circle cx="481" cy="46" r="4"/></g>
+<g fill="#c4c7c5" stroke="#30343d" stroke-width="3"><circle cx="293" cy="106" r="20"/><circle cx="435" cy="106" r="20"/></g><g fill="#181e27"><circle cx="293" cy="106" r="11"/><circle cx="435" cy="106" r="11"/></g>
+<text x="293" y="151" text-anchor="middle" style="fill:#9f331a;font-size:16px;font-weight:900;letter-spacing:2px">MEAT</text><text x="435" y="151" text-anchor="middle" style="fill:#9f331a;font-size:16px;font-weight:900;letter-spacing:2px">GRILL</text>
+<rect x="267" y="175" width="52" height="18" rx="4" fill="#1a2029" stroke="#c3c9ce" stroke-width="3"/><path d="M275 189h36" stroke="#808d99" stroke-width="2"/>
+<rect x="415" y="177" width="40" height="14" rx="2" fill="#181e27"/><rect x="437" y="178" width="12" height="12" rx="1" fill="#b9c1c7"/>
+<text x="293" y="221" text-anchor="middle">Charge / run</text><text x="435" y="221" text-anchor="middle">Power</text>
+<text x="34" y="104">2 × 3.5 mm</text><text x="34" y="123" class="muted">threaded panel jacks</text><path d="M165 104H265" class="line"/>
+<text x="34" y="183">Micro-USB</text><path d="M116 180H258" class="line"/>
+<path d="M225 260H503M225 253V267M503 253V267" class="line"/><text x="364" y="283" text-anchor="middle" class="mono">≈48 mm</text>
+<path d="M525 28V242M518 28H532M518 242H532" class="line"/><text x="546" y="140" class="mono">≈40 mm</text><text x="546" y="199" class="tiny muted">All cable ports</text><text x="546" y="215" class="tiny muted">on this end</text>
+</svg></section>
+<section><h2><span>03</span>Inside the stack</h2>
+<svg viewBox="0 0 728 570" role="img" aria-label="Side section, cable end left and antenna end right: protected battery, divider, lower charger and SD, upper jacks and ADS1115, top D1 Mini, supporting ledges and two-screw lid">
+<text x="52" y="23" class="label">CABLE END</text><text x="296" y="23" class="label">ANTENNA END</text><path d="M165 19H280M274 15L281 19 274 23" class="line"/>
+<path d="M78 62H388Q398 62 398 71V82H68V71Q68 62 78 62Z" class="dark"/><path d="M218 62Q208 52 228 43Q227 54 240 48Q256 58 244 62Z" fill="#ff702d"/>
+<g stroke="#a4adb6" stroke-width="4"><path d="M92 40V57M374 40V57"/></g><g stroke="#555f68" stroke-width="8"><path d="M88 40h8M370 40h8"/></g>
+<path d="M404 71H429" class="line"/><text x="440" y="66" class="label">LID + 2 SMALL SCREWS</text><text x="440" y="85" class="muted">Solid raised flame · lid lifted</text>
+<!-- Sectioned tray walls and supporting ledges at each board layer. -->
+<path d="M68 108H82V476H384V108H398V491H68Z" class="orange"/>
+<g fill="#d34e22" stroke="#a93819"><path d="M82 174H94V181H82M372 174H384V181H372M82 277H94V284H82M372 277H384V284H372M82 376H94V383H82M372 376H384V383H372"/></g>
+<!-- Top D1 Mini pushed toward antenna end, dedicated keep-clear region. -->
+<rect x="204" y="163" width="170" height="10" class="board"/><rect x="201" y="149" width="26" height="14" rx="2" fill="#bdc4cb" stroke="#525e6b"/><rect x="248" y="142" width="55" height="21" class="dark"/><path d="M337 159v-15h8v12h8v-12h8v12h10" fill="none" stroke="#d5bb6f" stroke-width="3"/>
+<path d="M328 124H378V201H328Z" class="line dash"/><text x="119" y="129" class="tiny muted">USB internal</text><path d="M173 132L209 147" class="line"/>
+<path d="M404 168H429" class="line"/><text x="440" y="132" class="label">TOP · ESP8266 D1 MINI</text><text x="440" y="152" class="mono">≈35 × 26 × 7 mm</text><text x="440" y="172" class="muted">Under lid · USB has no opening</text><text x="440" y="192" class="muted">Far-end antenna keep-clear zone</text>
+<!-- One jack shown: the second is behind, across the case width. -->
+<rect x="62" y="235" width="26" height="19" rx="3" fill="#bac0c5" stroke="#4f5864"/><rect x="87" y="234" width="72" height="21" rx="4" class="dark"/><text x="95" y="220" class="tiny muted">Second jack behind</text>
+<path d="M159 241H170M159 251H170" stroke="#b7a276" stroke-width="2"/><rect x="170" y="235" width="24" height="8" rx="3" fill="#555c68"/><rect x="170" y="247" width="24" height="8" rx="3" fill="#555c68"/>
+<rect x="204" y="266" width="153" height="10" class="board"/><rect x="255" y="254" width="46" height="12" class="dark"/>
+<path d="M404 264H429" class="line"/><text x="440" y="232" class="label">UPPER · GRAVITY ADS1115</text><text x="440" y="252" class="mono">≈32 × 32 mm · behind jacks</text><text x="440" y="272" class="tiny">Jacks: ≈8 W × 15 L mm each</text><text x="440" y="290" class="tiny muted">2 × 100 kΩ in heat shrink near jacks</text>
+<!-- Lower charger USB faces the cable wall; SD card faces the side wall. -->
+<rect x="91" y="365" width="150" height="10" class="board"/><rect x="77" y="347" width="28" height="16" rx="2" fill="#bdc4cb" stroke="#525e6b"/><rect x="143" y="350" width="43" height="15" class="dark"/>
+<rect x="251" y="365" width="121" height="10" class="board"/><rect x="279" y="345" width="63" height="20" rx="2" fill="#a6afb8" stroke="#465462"/><path d="M286 350H335" stroke="#e6e9eb" stroke-width="2"/>
+<text x="98" y="331" class="tiny muted">Charge port ←</text><text x="255" y="331" class="tiny muted">SD exits side wall</text>
+<path d="M404 364H429" class="line"/><text x="440" y="324" class="label">LOWER · CHARGER + SD</text><text x="440" y="344" class="tiny">Adafruit PowerBoost 1000C · ≈36 × 23 mm</text><text x="440" y="364" class="tiny">DFRobot Fermion MicroSD · ≈28 × 20 mm</text><text x="440" y="384" class="muted">Card turned toward side-wall slot</text>
+<!-- Divider immediately above the protected flat cell. -->
+<rect x="88" y="420" width="290" height="6" rx="1" fill="#ff9a55" stroke="#a93819"/><rect x="91" y="429" width="282" height="43" rx="7" fill="#b6bec5" stroke="#535f6a" stroke-width="1.5"/><path d="M103 435H350" stroke="#e2e6e9" stroke-width="2"/><text x="232" y="457" text-anchor="middle" style="fill:#29323a;font-size:12px">Protected 2000 mAh LiPo</text>
+<path d="M404 423H429" class="line"/><text x="440" y="423" class="label">THIN PRINTED DIVIDER</text><text x="440" y="443" class="muted">Shields cell from solder joints</text><text x="440" y="466" class="mono">Cell up to ≈60 × 38 × 8 mm</text><text x="440" y="486" class="muted">Floor layer · size unconfirmed</text>
+<path d="M82 381L43 401V510H429" class="line"/><text x="440" y="514" class="label">PRINTED TRAY + LEDGES</text><text x="440" y="534" class="muted">Stepped supports for board layers</text>
+<path d="M68 538H398M68 531V545M398 531V545" class="line"/><text x="233" y="561" text-anchor="middle" class="mono">≈70 mm long · schematic layer spacing</text>
+</svg></section>
+<p><strong>Untested:</strong> this case and the battery build in WIRING.md have not been built yet. Approximate concept illustration only, not printable CAD · case ≈70 × 48 × 40 mm. All dimensions approximate; board heights, cell size and stacked clearances unconfirmed. Protected rechargeable battery beneath a thin printed divider. Ribs and flame are solid relief, not vents. A USB pack can plug into the charge port for long cooks.</p>
+</main></body></html>
