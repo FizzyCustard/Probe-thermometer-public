@@ -27,7 +27,8 @@ network. Open `http://bbq.local/` in a browser and it's there.
 
 A D1 Mini (ESP8266), an ADS1115 ADC module, a micro SD card module, two 100 kΩ
 resistors, two 3.5 mm jack sockets, two 100 kΩ NTC probes and a USB battery pack.
-[`hardware/WIRING.md`](hardware/WIRING.md) has the full list and pinout.
+[`hardware/WIRING.md`](hardware/WIRING.md) has the full list and pinout. It
+also describes a battery-and-case version that hasn't been built or tested yet.
 
 The electronics are low voltage, but the device itself is not heat-proof: keep
 the board, battery and cables away from the grill, and check your probes' rated
@@ -36,7 +37,7 @@ maximum temperature, including the cable.
 ### Flash the firmware
 
 You need [PlatformIO](https://platformio.org/install/cli). Library versions are
-pinned in `platformio.ini` and install automatically.
+constrained in `platformio.ini` and install automatically.
 
 ```bash
 cp arduino/bbq-thermometer/config.example.h arduino/bbq-thermometer/config.h
@@ -76,9 +77,14 @@ Calibrate your probes from Settings for better accuracy.
 The device is designed for a **trusted home network** and must not be exposed to
 the internet. The dashboard, JSON API and WebSocket have no login, so anyone on
 your network can read temperatures and change settings, including WiFi details.
-WebSocket connections from browsers are only accepted from the device's own
-pages, which stops other websites driving it, and firmware updates need
+WebSocket connections from browsers are only accepted when the page's origin
+matches the address it was loaded from. That blocks ordinary cross-site
+requests, but it is not a full defence: a malicious site using DNS rebinding
+could still reach the device, so treat anything on your network, or any page
+you open while on it, as able to change settings. Firmware updates need
 `OTA_PASSWORD`.
+
+To report a security problem, see [`SECURITY.md`](SECURITY.md).
 
 ---
 
@@ -251,7 +257,16 @@ the web UI against a simulated device.
 
 ## License
 
-[MIT](LICENSE). The web UI bundles [Chart.js](https://www.chartjs.org/) (MIT),
-and the firmware builds on ESPAsyncWebServer and ESPAsyncTCP (LGPL-3.0),
+[MIT](LICENSE). The web UI bundles [Chart.js](https://www.chartjs.org/), which
+includes [@kurkle/color](https://github.com/kurkle/color). Both are MIT, and
+their full notices are in
+[`device/data/THIRD-PARTY-NOTICES.txt`](device/data/THIRD-PARTY-NOTICES.txt),
+which is uploaded to the device with the web UI.
+
+The firmware builds on ESPAsyncWebServer and ESPAsyncTCP (LGPL-3.0),
 ArduinoJson (MIT), the Adafruit ADS1X15 library (BSD) and NTPClient (MIT). Those
 libraries are downloaded at build time and are not included in this repository.
+If you share a compiled firmware binary, the LGPL-3.0 requires you to pass on
+those libraries' licence and source as well.
+
+Contributions are welcome. See [`CONTRIBUTING.md`](CONTRIBUTING.md).

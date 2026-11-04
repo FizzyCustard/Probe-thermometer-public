@@ -1,0 +1,42 @@
+name: Bug report
+description: Something on the device or dashboard isn't working
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start a cook
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Firmware version
+      description: The commit you flashed, from `git rev-parse --short HEAD`.
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Hardware
+      description: Board, ADC and SD modules, probes, and how it's powered.
+      placeholder: D1 Mini, ADS1115, micro SD module, 100 kΩ NTC probes, USB battery
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and device
+      placeholder: Safari on iPhone, Chrome on Android, Firefox on Linux...
+  - type: textarea
+    id: logs
+    attributes:
+      label: Serial log or /api/status output
+      description: Remove any WiFi names or passwords first.
+      render: text
