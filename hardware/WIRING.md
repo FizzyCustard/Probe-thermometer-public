@@ -1,39 +1,83 @@
 # BBQ Monitor — Hardware Wiring Guide
 
+This guide covers the planned battery build, which fits a 2000 mAh LiPo cell and
+a PowerBoost 1000C inside the case. It has not been built or tested yet. The case
+concept is in [`case-concept.html`](case-concept.html).
+
 ## Components
 
 | # | Component | Notes |
 |---|---|---|
-| 1 | AZDelivery D1 Mini (ESP8266-12F) | Your board |
-| 2 | ADS1115 16-bit ADC module | I2C, 4-channel |
-| 3 | Micro SD card module | SPI |
-| 4 | 2× 3.5mm stereo jack socket (TRS, panel mount) | For the Morpilot probes |
+| 1 | AZDelivery D1 Mini (ESP8266-12F) | Micro-USB version |
+| 2 | DFRobot Gravity ADS1115 16-bit ADC | I2C, 4-channel, 32 × 32 mm |
+| 3 | DFRobot Fermion MicroSD module | SPI, 28 × 20 mm |
+| 4 | 2× 3.5mm stereo jack socket (TRS, panel mount) | Replaces the Adafruit terminal blocks to save space |
 | 5 | 2× 100 kΩ resistor | Voltage divider, one per probe |
 | 6 | Morpilot NTC probes | Meat + Grill |
-| 7 | USB battery pack | Existing |
-| 8 | Perfboard + wire / jumpers | For prototyping |
+| 7 | 2000 mAh 3.7 V LiPo cell, JST-PH | The Pi Hut SKU 105187, with protection circuit |
+| 8 | Adafruit PowerBoost 1000C | Charger, load sharing and 5V boost |
+| 9 | Small SPST or SPDT slide switch | Power switch, carries signal current only |
+| 10 | 2-pin disconnect for the 5V lead | Lets you isolate the PowerBoost for wired flashing |
 
 ---
 
 ## System Block Diagram
 
 ```
+ USB pack or charger
+        │ micro-USB
+        ▼
+ ┌──────────────┐  JST-PH   ┌───────────┐
+ │ PowerBoost   │◀─────────▶│ LiPo cell │
+ │ 1000C        │           └───────────┘
+ │              │
+ │ EN ──────────┼──[ switch ]── GND      (switch closed = OFF)
+ │ 5V ──────────┼──[ disconnect ]──▶ D1 Mini 5V
+ │ GND ─────────┼──────────────────▶ D1 Mini G
+ └──────────────┘
+
                     ┌──────────────────┐
                     │   D1 MINI        │
-   USB battery ────▶│ 5V / GND        │
-                    │                  │
-                    │ D1 (SCL) ───────▶│──────────────────┐
-                    │ D2 (SDA) ───────▶│──────────────────┤  ADS1115
+                    │ D1 (SCL) ────────┼──────────────────┐
+                    │ D2 (SDA) ────────┼──────────────────┤  ADS1115
                     │                  │                  │  ┌───────────┐
-                    │ D5 (CLK) ───────▶│──────────────┐   ├─▶ SCL       │
-                    │ D6 (MISO)◀───────│──────────────┤   ├─▶ SDA       │
-                    │ D7 (MOSI)───────▶│──────────────┤   │  │           │
-                    │ D8 (CS)  ───────▶│──────────────┤   │  │ A0 ◀──────┼── Meat divider
-                    │                  │  SD CARD     │   │  │ A1 ◀──────┼── Grill divider
-                    │ 3.3V ───────────▶│◀─────────────┘   └──▶ VDD       │
-                    │ GND  ───────────▶│                     │ GND       │
+                    │ D5 (CLK) ────────┼──────────────┐   ├─▶ SCL       │
+                    │ D6 (MISO)◀───────┼──────────────┤   └─▶ SDA       │
+                    │ D7 (MOSI)────────┼──────────────┤      │           │
+                    │ D8 (CS)  ────────┼──────────────┤      │ A0 ◀──────┼── Meat divider
+                    │                  │  SD CARD     │      │ A1 ◀──────┼── Grill divider
+                    │ 3.3V ────────────┼─▶ ADS1115 VCC, SD VCC, dividers │
+                    │ G ───────────────┼─▶ ADS1115 GND, SD GND, jacks    │
                     └──────────────────┘                     └───────────┘
 ```
+
+---
+
+## Power Wiring (PowerBoost 1000C)
+
+| PowerBoost Pad | Connects To | Notes |
+|---|---|---|
+| JST socket | LiPo cell | Check polarity against the board's `+` and `-` marks before plugging in |
+| 5V | D1 Mini 5V, through the disconnect | Boosted output, about 5.2V |
+| GND | D1 Mini G | Common ground |
+| EN | One side of the switch | |
+| GND | Other side of the switch | Closing the switch turns the 5V output off |
+| Micro-USB | External charger or USB pack | Mount this port at the case opening |
+| BAT, USB, VS, LBO | Leave unconnected | |
+
+> **Warning: do not plug USB into the D1 Mini while the PowerBoost 5V lead is
+> connected.** Adafruit says not to apply voltage to the 5V pad. Separate the
+> 5V disconnect first. OTA updates do not need the D1 Mini's USB port.
+
+> **Run or charge:** the PowerBoost can charge the cell and power the device at
+> the same time. Plug a USB pack into its micro-USB port during long cooks.
+
+> **Charging while off:** Adafruit does not say whether the cell charges with EN
+> tied to GND. Test this before relying on it.
+
+> **Why boost to 5V:** the firmware assumes a fixed 3.3V divider supply
+> (`SUPPLY_VOLTAGE` in `config.h`). Feeding the LiPo straight into the D1 Mini
+> would let that rail sag as the cell runs down, which would shift the readings.
 
 ---
 
@@ -41,14 +85,13 @@
 
 | D1 Mini Pin | Wire | ADS1115 Pin | Notes |
 |---|---|---|---|
-| 3.3V | Red | VDD | Power |
-| GND | Black | GND | Ground |
+| 3.3V | Red | VCC | Power |
+| G | Black | GND | Ground |
 | D1 (GPIO5) | Yellow | SCL | I2C clock |
 | D2 (GPIO4) | Blue | SDA | I2C data |
-| GND | Black | ADDR | Sets I2C address to **0x48** |
 
-> **ADDR pin:** Tie ADDR to GND for address 0x48. This is what `config.h` expects.
-> If you tie it to VCC you get 0x49 — update `ADS1115_I2C_ADDRESS` in `config.h`.
+> **Address:** set the board's ADDR selector to **0x48**. This is what `config.h`
+> expects. If you use 0x49, update `ADS1115_I2C_ADDRESS` in `config.h`.
 
 ---
 
@@ -56,42 +99,33 @@
 
 | D1 Mini Pin | Wire | SD Module Pin | Notes |
 |---|---|---|---|
-| 3.3V | Red | VCC | Power — use 3.3V not 5V |
-| GND | Black | GND | Ground |
-| D5 (GPIO14) | Orange | CLK | SPI clock |
+| 3.3V | Red | VCC | See the power note below |
+| G | Black | GND | Ground |
+| D5 (GPIO14) | Orange | SCK | SPI clock |
 | D6 (GPIO12) | Purple | MISO | SPI data in |
 | D7 (GPIO13) | Green | MOSI | SPI data out |
-| D8 (GPIO15) | White | CS | Chip select |
+| D8 (GPIO15) | White | SS | Chip select |
 
-> **Power note:** Most SD modules have an onboard 3.3V regulator and level
-> shifters. Use the 3.3V pin on the D1 Mini anyway to be safe. Check your
-> module's datasheet — if it says "accepts 5V" you can use 5V, but 3.3V always works.
+> **Power note:** DFRobot rates this module at 5V and does not mention 3.3V. If
+> your module works reliably on 3.3V, keep it there. Before moving it to 5V,
+> confirm its MISO output is safe for the ESP8266's 3.3V inputs.
 
 ---
 
 ## Probe Voltage Divider (build 2× — one per probe)
 
 Each probe is a 2-terminal NTC thermistor. The tip of the 3.5mm plug is one
-terminal; the sleeve is the other (GND). Wire up one divider circuit per probe:
+terminal; the sleeve is the other (GND). Wire up one divider per probe, and
+solder each resistor close to its jack with heat shrink over the joints.
 
 ```
-3.3V ──┬── 100 kΩ ──┬── ADS1115 channel ──┬── 3.5mm jack TIP
-       │             │                     │   (probe terminal 1)
-       │             │        PROBE        │
-       │             │     ┌─────────┐     │
-       │             └─────┤  NTC    ├─────┘
-       │                   └─────────┘
-       │                        │
-      GND ─────────────────────┘
-                            3.5mm jack SLEEVE
-                            (probe terminal 2)
-```
-
-### Simplified view
-
-```
-3.3V ──── [100 kΩ] ──── ADS1115 A0 ──── PROBE ──── GND
-3.3V ──── [100 kΩ] ──── ADS1115 A1 ──── PROBE ──── GND
+3.3V ──── [100 kΩ] ──┬── ADS1115 A0 (meat) or A1 (grill)
+                     │
+                 JACK TIP
+                     │
+                 NTC PROBE
+                     │
+                JACK SLEEVE ──── GND
 ```
 
 ### 3.5mm TRS Jack Wiring
@@ -119,36 +153,41 @@ terminal; the sleeve is the other (GND). Wire up one divider circuit per probe:
 
 | D1 Mini Label | GPIO | Used For | Connected To |
 |---|---|---|---|
+| 5V | — | Power in | PowerBoost 5V, through the disconnect |
 | D1 | GPIO5 | I2C SCL | ADS1115 SCL |
 | D2 | GPIO4 | I2C SDA | ADS1115 SDA |
-| D5 | GPIO14 | SPI CLK | SD CLK |
+| D5 | GPIO14 | SPI CLK | SD SCK |
 | D6 | GPIO12 | SPI MISO | SD MISO |
 | D7 | GPIO13 | SPI MOSI | SD MOSI |
-| D8 | GPIO15 | SPI CS | SD CS |
-| 3.3V | — | Power rail | ADS1115 VDD, SD VCC |
-| GND | — | Ground rail | ADS1115 GND+ADDR, SD GND, probe sleeves |
+| D8 | GPIO15 | SPI CS | SD SS |
+| 3.3V | — | Power rail | ADS1115 VCC, SD VCC, both 100 kΩ resistors |
+| G | — | Ground rail | PowerBoost GND, ADS1115 GND, SD GND, jack sleeves |
 | A0 | ADC | **Not used** | (ESP8266 has only 1 ADC — we use ADS1115 instead) |
 | D0, D3, D4, TX, RX | — | Spare | — |
 
 ---
 
-## Suggested Breadboard Build Order
+## Suggested Build Order
 
 Build and test in this order so you can catch problems early:
 
-1. **Power first** — connect D1 Mini to USB, confirm 3.3V on the rail with a multimeter before connecting anything.
+1. **Power first** — with nothing connected to its 5V pad, plug the cell into the PowerBoost. Confirm about 5.2V on the pad with a multimeter, and that closing the switch turns it off. Plug in USB and confirm the charge LED lights.
 
-2. **ADS1115** — wire VDD, GND, SCL, SDA, ADDR. Flash a basic I2C scanner sketch and confirm address `0x48` appears in Serial Monitor.
+2. **D1 Mini** — connect it to the PowerBoost 5V and GND. Confirm 3.3V on its rail before connecting anything else.
 
-3. **One probe divider** — wire the 100 kΩ resistor and one 3.5mm jack to ADS1115 A0. Plug the meat probe in. Flash a thermistor test sketch and confirm a sensible resistance reading (~100 kΩ at room temp).
+3. **ADS1115** — wire VCC, GND, SCL and SDA, and set the address to 0x48. Confirm `0x48` appears on an I2C scanner sketch.
 
-4. **Second probe divider** — repeat for ADS1115 A1 with the grill probe.
+4. **One probe divider** — wire the 100 kΩ resistor and one jack to ADS1115 A0. Plug the meat probe in and confirm a sensible resistance reading (~100 kΩ at room temp).
 
-5. **SD card** — wire CLK, MISO, MOSI, CS. Use the `SD` library `CardInfo` example to confirm the card mounts and reads back a file.
+5. **Second probe divider** — repeat for ADS1115 A1 with the grill probe.
 
-6. **Full firmware** — flash `bbq-thermometer.ino`. Open Serial Monitor at 115200 baud to confirm each step of the boot sequence. Copy `config.h` from `config.example.h` first.
+6. **SD card** — wire SCK, MISO, MOSI and SS. Use the `SD` library `CardInfo` example to confirm the card mounts and reads back a file.
 
-7. **Web UI** — upload `device/data/` folder to LittleFS using the LittleFS upload plugin. Open `http://<IP>` in a browser and confirm the LIVE indicator appears.
+7. **Full firmware** — disconnect the 5V lead before using the D1 Mini's USB port. Flash `bbq-thermometer.ino` and open Serial Monitor at 115200 baud to confirm each step of the boot sequence. Copy `config.h` from `config.example.h` first.
+
+8. **Web UI** — upload `device/data/` folder to LittleFS using the LittleFS upload plugin. Open `http://<IP>` in a browser and confirm the LIVE indicator appears.
+
+9. **Battery run** — reconnect the 5V lead and run from the cell with the probes in a known temperature. Compare the readings with USB power and re-run calibration if they have shifted.
 
 ---
 
@@ -157,18 +196,35 @@ Build and test in this order so you can catch problems early:
 | Component | Current (approx) |
 |---|---|
 | D1 Mini (WiFi active) | 70–80 mA |
-| ADS1115 | < 1 mA |
+| ADS1115 | 2–3 mA |
 | SD card (active write) | 30–50 mA |
-| **Total** | **~100–130 mA** |
+| PowerBoost (enabled) | 5 mA |
+| **Total** | **~105–135 mA** |
 
-A 10,000 mAh USB battery pack provides an estimated **70–90 hours** of runtime.
+| Power Source | Estimated Runtime |
+|---|---|
+| 2000 mAh cell | 8.5–11 hours |
+| 10,000 mAh USB pack, through the charge port | 40–50 hours, less while it also charges the cell |
+
+The cell estimate assumes 7.4 Wh, 90% boost efficiency and 10% unusable capacity.
+It has not been measured on the device. A full charge from empty will take a few
+hours at the 1000 mA maximum, and longer from a low-current USB source.
+
+---
+
+## Battery Safety
+
+- Keep the cell away from heat. Do not charge it while the case is hot or in direct sun.
+- Fit a printed divider over the cell so solder joints and pins cannot press into it.
+- Do not use a swollen, punctured or crushed cell.
+- Do not leave the device charging unattended.
 
 ---
 
 ## Decoupling Capacitors (recommended, not required for breadboard)
 
-When you move to perfboard, add:
-- 100 nF ceramic capacitor across ADS1115 VDD–GND (close to the chip)
+Add these to the final build:
+- 100 nF ceramic capacitor across ADS1115 VCC–GND (close to the board)
 - 100 nF ceramic capacitor across SD module VCC–GND
 - 10 µF electrolytic across the 3.3V rail overall
 

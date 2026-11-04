@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include "net_guards.h"
 #include "thermistor.h"
+#include "deferred_queue.h"
 
 Adafruit_ADS1115 ads;
 bool adsReady = false;
@@ -74,6 +75,19 @@ int main() {
   CHECK(isnan(resistanceToCelsius(100000.0f, 0)));
   probeCoeffs[0] = { INFINITY, 0.0f, 0.0f };
   CHECK(isnan(resistanceToCelsius(100000.0f, 0)));
+
+  // Deferred writes keep their order and refuse, rather than overwrite, when full
+  DeferredQueue<int, 3> q;
+  int v = 0;
+  CHECK(!q.pop(v));
+  CHECK(q.push(1) && q.push(2) && q.push(3));
+  CHECK(!q.push(4));
+  CHECK(q.pop(v) && v == 1);
+  CHECK(q.push(4));                       // wraps around the ring
+  CHECK(q.pop(v) && v == 2);
+  CHECK(q.pop(v) && v == 3);
+  CHECK(q.pop(v) && v == 4);
+  CHECK(!q.pop(v));
 
   printf("%s (%d failed)\n", failures ? "FAILED" : "OK", failures);
   return failures ? 1 : 0;

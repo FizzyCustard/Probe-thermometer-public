@@ -8,6 +8,7 @@
 #include "wifi_manager.h"
 #include "net_guards.h"
 #include "snapshot.h"
+#include "deferred_queue.h"
 
 extern AsyncWebSocket ws;
 extern float meatTarget;
@@ -59,6 +60,38 @@ static uint32_t wsRestartAt = 0;
 static bool     userWifiTestPending  = false;
 static uint32_t userWifiTestClientId = 0;
 
+// ── Deferred writes ───────────────────────────────────────────────────────────
+//
+// SD and flash writes block too, so the callback never does them. Settings and
+// favourites change in RAM straight away and are marked dirty; wsTick() writes
+// the latest copy. Cook commands go through a FIFO so start, notes and stop
+// reach the card in the order they were sent.
+static bool settingsDirty = false;
+static bool favsDirty     = false;
+
+enum CookCmdKind : uint8_t { COOK_CMD_START, COOK_CMD_STOP, COOK_CMD_NOTE };
+struct CookCmd {
+  uint8_t  kind;
+  uint32_t clientId;
+  char     ts[24];
+  float    meatTarget, grillLow, grillHigh;   // start only
+  float    meatC;                             // note only (NAN when absent)
+  union {
+    struct { char name[64]; char preset[48]; } start;
+    char text[200];                           // note
+  } u;
+};
+static DeferredQueue<CookCmd, 4> cookCmds;
+
+// A WiFi switch in STA mode: saved and restarted from wsTick().
+struct PendingWifiSave {
+  bool     pending;
+  uint32_t clientId;
+  char     ssid[64];
+  char     pass[64];
+};
+static PendingWifiSave pendingWifiSave = {};
+
 // ── Inbound message handler ───────────────────────────────────────────────────
 
 void onWsMessage(AsyncWebSocketClient* client, const char* data, size_t len) {
@@ -81,9 +114,7 @@ void onWsMessage(AsyncWebSocketClient* client, const char* data, size_t len) {
     meatTarget = mt;
     grillLow   = gl;
     grillHigh  = gh;
-    saveSettings(meatTarget, grillLow, grillHigh);
-    Serial.printf("Settings updated: meat=%.1f grill=%.1f–%.1f\n",
-                  meatTarget, grillLow, grillHigh);
+    settingsDirty = true;   // written by wsTick()
     return;
   }
 
@@ -109,12 +140,21 @@ void onWsMessage(AsyncWebSocketClient* client, const char* data, size_t len) {
       strlcpy(ts, ok ? bts : "unknown", sizeof(ts));
     }
 
-    bool started = targetsValid(mt, gl, gh) &&
-                   cookStart(name, preset, mt, gl, gh, ts);
+    // Queued: cookStart() writes the file header. wsTick() sends the reply.
+    CookCmd cmd = {};
+    cmd.kind       = COOK_CMD_START;
+    cmd.clientId   = client->id();
+    cmd.meatTarget = mt;
+    cmd.grillLow   = gl;
+    cmd.grillHigh  = gh;
+    strlcpy(cmd.ts,             ts,     sizeof(cmd.ts));
+    strlcpy(cmd.u.start.name,   name,   sizeof(cmd.u.start.name));
+    strlcpy(cmd.u.start.preset, preset, sizeof(cmd.u.start.preset));
+    if (targetsValid(mt, gl, gh) && cookCmds.push(cmd)) return;
 
     JsonDocument resp;
     resp["type"]    = "cook_started";
-    resp["started"] = started;
+    resp["started"] = false;
     String out;
     serializeJson(resp, out);
     client->text(out);
@@ -130,16 +170,12 @@ void onWsMessage(AsyncWebSocketClient* client, const char* data, size_t len) {
       strlcpy(ts, doc["ts"] | "unknown", sizeof(ts));
       csvSanitize(ts);   // browser-supplied — keep it from corrupting the CSV footer
     }
-    // Copied first: cookStop() ends the session this name belongs to.
-    String file = activeCook.active ? String(fileBasename(activeCook.filename)) : String();
-    cookStop(ts);
-
-    JsonDocument resp;
-    resp["type"] = "cook_stopped";
-    if (file.length()) resp["file"] = file;
-    String out;
-    serializeJson(resp, out);
-    client->text(out);
+    // Queued: cookStop() writes the footer. wsTick() sends the reply.
+    CookCmd cmd = {};
+    cmd.kind     = COOK_CMD_STOP;
+    cmd.clientId = client->id();
+    strlcpy(cmd.ts, ts, sizeof(cmd.ts));
+    if (!cookCmds.push(cmd)) Serial.println("Cook stop dropped: queue full");
     return;
   }
 
@@ -147,8 +183,12 @@ void onWsMessage(AsyncWebSocketClient* client, const char* data, size_t len) {
   if (strcmp(type, "cook_note") == 0) {
     const char* text = doc["text"] | "";
     // Use NAN sentinel only if field is actually present; cookAppendNote guards it
-    float meatC = doc["meat_c"].is<float>() ? doc["meat_c"].as<float>() : NAN;
-    cookAppendNote(text, meatC);
+    CookCmd cmd = {};
+    cmd.kind     = COOK_CMD_NOTE;
+    cmd.clientId = client->id();
+    cmd.meatC    = doc["meat_c"].is<float>() ? doc["meat_c"].as<float>() : NAN;
+    strlcpy(cmd.u.text, text, sizeof(cmd.u.text));
+    if (!cookCmds.push(cmd)) Serial.println("Cook note dropped: queue full");
     return;
   }
 
@@ -188,7 +228,7 @@ void onWsMessage(AsyncWebSocketClient* client, const char* data, size_t len) {
     favs[idx].meatTarget = favMeat;
     favs[idx].grillLow   = favLow;
     favs[idx].grillHigh  = favHigh;
-    saveFavourites(favs, favCount);
+    favsDirty = true;   // written by wsTick()
 
     sendConfig(client);
     return;
@@ -202,7 +242,7 @@ void onWsMessage(AsyncWebSocketClient* client, const char* data, size_t len) {
         // Shift remaining entries down
         memmove(&favs[i], &favs[i + 1], (favCount - i - 1) * sizeof(Favourite));
         favCount--;
-        saveFavourites(favs, favCount);
+        favsDirty = true;   // written by wsTick()
         break;
       }
     }
@@ -285,12 +325,12 @@ void onWsMessage(AsyncWebSocketClient* client, const char* data, size_t len) {
         resp["ssid"] = ssid;
       }
     } else {
-      bool saved = saveWifiCreds(ssid, pass);
-      resp["type"]       = "wifi_saved";
-      resp["saved"]      = saved;
-      resp["restarting"] = saved;
-      if (!saved) resp["reason"] = "fs_write_failed";
-      if (saved) wsRestartAt = millis() + 1500;   // restart from loop, not here
+      // Queued: the flash write and the reply happen in wsTick().
+      pendingWifiSave.clientId = client->id();
+      strlcpy(pendingWifiSave.ssid, ssid, sizeof(pendingWifiSave.ssid));
+      strlcpy(pendingWifiSave.pass, pass, sizeof(pendingWifiSave.pass));
+      pendingWifiSave.pending = true;
+      return;
     }
     String out;
     serializeJson(resp, out);
@@ -351,9 +391,9 @@ void onWsMessage(AsyncWebSocketClient* client, const char* data, size_t len) {
 
 // ── Deferred work (runs from loop(), not the async callback) ──────────────────
 //
-// SD reads and WiFi scans block for long enough to starve the TCP stack and
-// trip the soft watchdog if run inside the WebSocket event handler. wsTick()
-// below dispatches them from loop().
+// SD reads and writes, flash writes and WiFi scans block for long enough to
+// starve the TCP stack and trip the soft watchdog if run inside the WebSocket
+// event handler. wsTick() below dispatches them from loop().
 
 // Parse one line of a cook file into list metadata. Returns via out-params.
 static void cookListParseLine(const String& line, JsonObject& cook,
@@ -679,7 +719,64 @@ static void applyPendingCalibration(AsyncWebSocketClient* client) {
 
 // Called from loop(): services one deferred request, delivers WiFi-test
 // results, and performs any scheduled restart.
+// Sends a small JSON reply to one client, if it is still connected.
+static void replyTo(uint32_t clientId, JsonDocument& resp) {
+  AsyncWebSocketClient* client = ws.client(clientId);
+  if (!client || client->status() != WS_CONNECTED) return;
+  String out;
+  serializeJson(resp, out);
+  client->text(out);
+}
+
+// Runs one queued cook command and sends its reply.
+static void runCookCmd(const CookCmd& cmd) {
+  if (cmd.kind == COOK_CMD_START) {
+    bool started = cookStart(cmd.u.start.name, cmd.u.start.preset,
+                             cmd.meatTarget, cmd.grillLow, cmd.grillHigh, cmd.ts);
+    JsonDocument resp;
+    resp["type"]    = "cook_started";
+    resp["started"] = started;
+    replyTo(cmd.clientId, resp);
+  } else if (cmd.kind == COOK_CMD_STOP) {
+    // Copied first: cookStop() ends the session this name belongs to.
+    String file = activeCook.active ? String(fileBasename(activeCook.filename)) : String();
+    cookStop(cmd.ts);
+    JsonDocument resp;
+    resp["type"] = "cook_stopped";
+    if (file.length()) resp["file"] = file;
+    replyTo(cmd.clientId, resp);
+  } else if (cmd.kind == COOK_CMD_NOTE) {
+    cookAppendNote(cmd.u.text, cmd.meatC);
+  }
+}
+
 void wsTick() {
+  // 0. Deferred writes. These run before the reads below, so a cook list
+  //    requested straight after a stop already sees the footer.
+  if (settingsDirty) {
+    settingsDirty = false;
+    saveSettings(meatTarget, grillLow, grillHigh);
+  }
+  if (favsDirty) {
+    favsDirty = false;
+    saveFavourites(favs, favCount);
+  }
+  CookCmd cmd;
+  while (cookCmds.pop(cmd)) runCookCmd(cmd);
+
+  if (pendingWifiSave.pending) {
+    pendingWifiSave.pending = false;
+    bool saved = saveWifiCreds(pendingWifiSave.ssid, pendingWifiSave.pass);
+    memset(pendingWifiSave.pass, 0, sizeof(pendingWifiSave.pass));
+    JsonDocument resp;
+    resp["type"]       = "wifi_saved";
+    resp["saved"]      = saved;
+    resp["restarting"] = saved;
+    if (!saved) resp["reason"] = "fs_write_failed";
+    if (saved) wsRestartAt = millis() + 1500;
+    replyTo(pendingWifiSave.clientId, resp);
+  }
+
   // 1. Deferred client request (cook list / cook data / wifi scan / cal save)
   if (pendingKind != PENDING_NONE) {
     uint8_t kind = pendingKind;
