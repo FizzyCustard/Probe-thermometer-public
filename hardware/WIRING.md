@@ -46,7 +46,8 @@ concept is in [`case-concept.html`](case-concept.html).
                     │ D7 (MOSI)────────┼──────────────┤      │           │
                     │ D8 (CS)  ────────┼──────────────┤      │ A0 ◀──────┼── Meat divider
                     │                  │  SD CARD     │      │ A1 ◀──────┼── Grill divider
-                    │ 3.3V ────────────┼─▶ ADS1115 VCC, SD VCC, dividers │
+                    │ 5V   ────────────┼─▶ SD VCC                        │
+                    │ 3.3V ────────────┼─▶ ADS1115 VCC, dividers         │
                     │ G ───────────────┼─▶ ADS1115 GND, SD GND, jacks    │
                     └──────────────────┘                     └───────────┘
 ```
@@ -99,16 +100,16 @@ concept is in [`case-concept.html`](case-concept.html).
 
 | D1 Mini Pin | Wire | SD Module Pin | Notes |
 |---|---|---|---|
-| 3.3V | Red | VCC | See the power note below |
+| 5V | Red | VCC | See the power note below |
 | G | Black | GND | Ground |
 | D5 (GPIO14) | Orange | SCK | SPI clock |
 | D6 (GPIO12) | Purple | MISO | SPI data in |
 | D7 (GPIO13) | Green | MOSI | SPI data out |
 | D8 (GPIO15) | White | SS | Chip select |
 
-> **Power note:** DFRobot rates this module at 5V and does not mention 3.3V. If
-> your module works reliably on 3.3V, keep it there. Before moving it to 5V,
-> confirm its MISO output is safe for the ESP8266's 3.3V inputs.
+> **Power note:** DFRobot rates this module at 5V, so wire VCC to 5V. Check your
+> own module's rating before powering it. A bare SD breakout with no onboard
+> regulator or level shifting is 3.3V-only and must go on 3.3V instead.
 
 ---
 
@@ -153,14 +154,14 @@ solder each resistor close to its jack with heat shrink over the joints.
 
 | D1 Mini Label | GPIO | Used For | Connected To |
 |---|---|---|---|
-| 5V | — | Power in | PowerBoost 5V, through the disconnect |
+| 5V | — | Power in | PowerBoost 5V, through the disconnect; SD VCC |
 | D1 | GPIO5 | I2C SCL | ADS1115 SCL |
 | D2 | GPIO4 | I2C SDA | ADS1115 SDA |
 | D5 | GPIO14 | SPI CLK | SD SCK |
 | D6 | GPIO12 | SPI MISO | SD MISO |
 | D7 | GPIO13 | SPI MOSI | SD MOSI |
 | D8 | GPIO15 | SPI CS | SD SS |
-| 3.3V | — | Power rail | ADS1115 VCC, SD VCC, both 100 kΩ resistors |
+| 3.3V | — | Power rail | ADS1115 VCC, both 100 kΩ resistors |
 | G | — | Ground rail | PowerBoost GND, ADS1115 GND, SD GND, jack sleeves |
 | A0 | ADC | **Not used** | (ESP8266 has only 1 ADC — we use ADS1115 instead) |
 | D0, D3, D4, TX, RX | — | Spare | — |

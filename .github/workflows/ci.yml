@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, claude/bbq-thermometer-MAIN]
+    branches: [main]
   pull_request:
 
 jobs:

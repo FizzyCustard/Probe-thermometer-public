@@ -67,7 +67,8 @@ The 3.5mm jack Tip carries the thermistor signal; Sleeve is GND.
 | D6 (MISO) | SD card MISO |
 | D7 (MOSI) | SD card MOSI |
 | D8 (CS) | SD card CS |
-| 3.3V | ADS1115 VDD, SD card VCC |
+| 5V | SD card VCC (check your module's rating; 3.3V-only breakouts go on 3.3V) |
+| 3.3V | ADS1115 VDD |
 | GND | ADS1115 GND, SD card GND, probe sleeves |
 
 ### ADS1115 Channel Map
