@@ -2,11 +2,11 @@
 
 **Date:** 2026-07-05
 **Scope:** `arduino/bbq-thermometer/` firmware, plus device-side deployment concerns
-(what the ESP8266 actually serves from LittleFS). The Netlify demo (`data/`) is out
-of scope per request.
+(what the ESP8266 actually serves from LittleFS). A browser-only demo build of
+the web UI that existed at the time was out of scope.
 
-This review was done independently of `arduino/CODE_REVIEW.md` and
-`arduino/IMPROVEMENTS.md`. A cross-reference section at the end notes where findings
+This review was done independently of `CODE_REVIEW.md` and
+`IMPROVEMENTS.md` (both in this folder). A cross-reference section at the end notes where findings
 overlap with those documents; everything else here is new.
 
 ---
@@ -21,7 +21,7 @@ bug, and a settings-clobbering bug that silently undoes the SD persistence work.
 Below those, there's a cluster of blocking-work-in-async-callback issues and a set of
 ESP8266-specific performance/memory wins.
 
-**Status legend (updated 2026-07-05, commit `286ace6`):** ✅ fixed.
+**Status legend (updated 2026-07-05):** ✅ fixed.
 All 21 findings below were implemented the same day; per-item notes in the
 "Implementation status" section at the end of this file.
 
@@ -440,9 +440,9 @@ config.h), reading smoothing (median-of-3), probe-disconnect debounce
 (3 consecutive bad samples), cook resume after reboot, SD/heap telemetry in the
 broadcast with a UI warning banner, `DEBUG_READINGS` flag, `yield()` +
 head/tail-chunk reads in the cook list, `MAX_POINTS` 240→150, and Chart.js
-bundled locally (plain for Netlify + `.gz` for the ESP, served automatically).
+bundled locally (plain file plus a `.gz` copy, served automatically).
 
-Consciously NOT done here (still tracked in `arduino/IMPROVEMENTS.md`):
+Consciously NOT done here (still tracked in `IMPROVEMENTS.md`):
 the project-wide String→static-buffer refactor (§1) — invasive and mechanical;
 only the hot-path additions were avoided in new code — and pre-gzipping the
 remaining small web assets. Unpinned git deps in `platformio.ini` also remain

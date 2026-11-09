@@ -1,6 +1,6 @@
 # Known issues — to work on later
 
-Two items found while fixing [tick-stream.md](tick-stream.md) and flashing the
+Two items (one since fixed) found while fixing [tick-stream.md](tick-stream.md) and flashing the
 device on 2026-09-06. Neither is urgent; both need a reflash, so they pair well
 with the next firmware change.
 
@@ -9,13 +9,13 @@ with the next firmware change.
 ## 1. Cook timestamps are logged in UTC, an hour behind UK local time
 
 **Severity:** low — cosmetic, but it corrupts the timeline of every cook record
-**File:** `arduino/bbq-thermometer/config.h` (line 16), `bbq-thermometer.ino:60`
+**File:** `NTP_UTC_OFFSET_SEC` in `config.h`, `bbq-thermometer.ino` (NTP setup)
 
 ### Problem
 
-`NTP_UTC_OFFSET_SEC` is `0`, carried over from the old Mac config. The UK is on
-BST (UTC+1) from 2026-03-29 to 2026-10-25, so everything the device timestamps
-is currently an hour behind local time.
+`NTP_UTC_OFFSET_SEC` defaults to `0`. In a timezone with daylight saving, such
+as the UK on BST (UTC+1) from 2026-03-29 to 2026-10-25, everything the device
+timestamps is an hour behind local time for half the year.
 
 Observed on the serial boot log immediately after flashing:
 
@@ -45,7 +45,7 @@ side of that boundary will disagree by an hour with no indication why.
 2. **Proper (preferred):** drop the `NTPClient` library's fixed offset and use
    the ESP8266 core's own `configTime()` with a POSIX TZ string —
    `GMT0BST,M3.5.0/1,M10.5.0` — which handles DST transitions automatically and
-   forever. Touches `bbq-thermometer.ino:60` and the NTP block in `setup()`.
+   forever. Touches the `NTPClient` setup and the NTP block in `setup()`.
 3. **Nice-to-have:** expose the timezone in the settings UI and persist it to SD
    alongside the other settings, so it never needs a reflash again.
 
@@ -53,7 +53,10 @@ Option 2 is the real fix. Option 1 is a stopgap if a cook is imminent.
 
 ---
 
-## 2. `upload_all.py` doesn't pass the upload port through, so OTA half-works
+## 2. ✅ Fixed — `upload_all.py` didn't pass the upload port through, so OTA half-worked
+
+**Status:** fixed. `scripts/upload_all.py` now forwards `$UPLOAD_PORT` to the
+`uploadfs` step, as in the fix below. Kept for the notes under "Related".
 
 **Severity:** low — confusing, not destructive
 **File:** `scripts/upload_all.py`
@@ -98,9 +101,9 @@ def upload_filesystem(source, target, env):
 ### Related, while in here
 
 - **An OTA filesystem upload wipes `/wifi.json`**, same as a serial one, because
-  it rewrites all of LittleFS. Recovery is automatic now that real credentials
-  are compiled into `config.h` (`bbq-thermometer.ino:124-127` re-saves them on
-  boot), but it is worth remembering before flashing from another room.
+  it rewrites all of LittleFS. Recovery is automatic if credentials are compiled
+  into `config.h` (`setup()` re-saves them on boot); otherwise the device falls
+  back to AP mode. Worth remembering before flashing from another room.
 - **OTA needs free flash equal to the sketch size.** Currently 466 KB used of
   1044 KB program space, so ~577 KB headroom — fine today, worth watching as the
   firmware grows.

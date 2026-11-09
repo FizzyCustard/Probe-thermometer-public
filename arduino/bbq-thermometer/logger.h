@@ -196,8 +196,8 @@ void seedDefaultPresets(Preset* list, uint8_t& count) {
     { "Beef \xe2\x80\x94 well done",       71.0f },
     { "Lamb \xe2\x80\x94 medium rare",     57.0f },
     { "Lamb \xe2\x80\x94 medium",          63.0f },
-    { "Pork \xe2\x80\x94 safe minimum",    71.0f },
-    { "Chicken \xe2\x80\x94 safe minimum", 74.0f },
+    { "Pork \xe2\x80\x94 well done",        71.0f },
+    { "Chicken \xe2\x80\x94 well done",     74.0f },
     { "Brisket / pulled pork",             95.0f },
   };
   count = 0;

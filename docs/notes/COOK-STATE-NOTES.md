@@ -22,7 +22,7 @@ The broadcast partial-sync meant `window.__cookState.name` was eventually set (w
 
 ---
 
-## The Fix (commit `dcb7ba3`)
+## The Fix
 
 Three files changed:
 
@@ -54,9 +54,3 @@ The fix restores state from **device RAM** (the `activeCook` struct), not direct
 - The browser would show "No active cook" after reconnecting
 
 Fully recovering from a device restart would require detecting incomplete cook files on boot (has `#started_at` but no `#stopped_at`) and re-populating `activeCook` from the CSV header. That is out of scope for this fix.
-
----
-
-## Developer Note
-
-A local implementation of this fix may exist outside this repo. Before re-implementing or extending cook state persistence, verify whether that local version was pushed to this branch or differs in approach.

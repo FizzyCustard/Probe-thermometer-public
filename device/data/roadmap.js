@@ -15,8 +15,8 @@ window.__presets = [
   { name: 'Beef — well done',      c: 71 },
   { name: 'Lamb — medium rare',    c: 57 },
   { name: 'Lamb — medium',         c: 63 },
-  { name: 'Pork — safe minimum',   c: 71 },
-  { name: 'Chicken — safe minimum',c: 74 },
+  { name: 'Pork — well done',      c: 71 },
+  { name: 'Chicken — well done',   c: 74 },
   { name: 'Brisket / pulled pork', c: 95 },
 ];
 

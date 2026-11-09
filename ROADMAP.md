@@ -42,8 +42,8 @@ A place to capture ideas and future features before they become code.
 | Beef — well done | 71 °C |
 | Lamb — medium rare | 57 °C |
 | Lamb — medium | 63 °C |
-| Pork — safe minimum | 71 °C |
-| Chicken — safe minimum | 74 °C |
+| Pork — well done | 71 °C |
+| Chicken — well done | 74 °C |
 | Brisket / pulled pork | 95 °C |
 
 ---
@@ -52,7 +52,7 @@ A place to capture ideas and future features before they become code.
 
 **Goal:** Opening the device in a new browser tab or refreshing the page should show the same active cook state as the original tab.
 
-**Completed** (commit `dcb7ba3`). The device now includes full active cook state in the config payload sent to every new WebSocket client on connect. The browser restores cook name, elapsed time, targets, and preset from this immediately on load. See `COOK-STATE-NOTES.md` for full details and caveats.
+**Completed.** The device now includes full active cook state in the config payload sent to every new WebSocket client on connect. The browser restores cook name, elapsed time, targets, and preset from this immediately on load. See [`docs/notes/COOK-STATE-NOTES.md`](docs/notes/COOK-STATE-NOTES.md) for full details and caveats.
 
 ---
 
@@ -60,4 +60,4 @@ A place to capture ideas and future features before they become code.
 
 **Goal:** Meat and grill temperatures occupy very different ranges — plotting them on a shared axis cramped the meat line into the bottom quarter of the chart.
 
-**Completed** (commit `071c1d1`). The live chart now uses two independent Y-axes: meat on the left (0–160 °C), grill on the right (0–320 °C). Tick colours match the probe line colours. Both axes rescale correctly when switching between °C and °F.
+**Completed.** The live chart now uses two independent Y-axes: meat on the left (0–160 °C), grill on the right (0–320 °C). Tick colours match the probe line colours. Both axes rescale correctly when switching between °C and °F.

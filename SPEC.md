@@ -175,7 +175,7 @@ meat_target_c,grill_low_c,grill_high_c
 name,meat_target_c
 Beef — rare,52
 Beef — medium rare,57
-Chicken — safe minimum,74
+Chicken — well done,74
 Brisket / pulled pork,95
 ```
 
@@ -191,14 +191,21 @@ Reverse Sear Ribeye,54,110,130,Beef — medium rare
 ```json
 {
   "ts": "2025-07-14T14:32:05",
-  "meat": { "c": 67.4, "f": 153.3 },
-  "grill": { "c": 182.3, "f": 360.1 },
-  "eta_minutes": 42,
+  "meat": { "c": 67.4, "r": 9210 },
+  "grill": { "c": 182.3, "r": 612 },
   "meat_target": 74.0,
   "grill_low": 160.0,
-  "grill_high": 200.0
+  "grill_high": 200.0,
+  "sd": true,
+  "heap": 21456,
+  "cook_active": false,
+  "rssi": -61
 }
 ```
+
+Temperatures are always °C; the browser converts to °F. See
+[`arduino/FIRMWARE-SPEC.md`](arduino/FIRMWARE-SPEC.md) for the cook and AP-mode
+fields.
 
 ---
 
@@ -279,11 +286,14 @@ Any device on the same WiFi network opens `http://<device-ip>` in a browser. No 
 ### LittleFS (onboard flash — web UI)
 
 ```
-/data
+device/data/
   index.html
   style.css
   app.js
-  chart.min.js
+  roadmap.js
+  chart.umd.min.js     (plus chart.umd.min.js.gz, served to the browser)
+  favicon.svg
+  manifest.json
 ```
 
 ### SD Card (data logs)
@@ -304,12 +314,14 @@ Any device on the same WiFi network opens `http://<device-ip>` in a browser. No 
 ### Firmware
 
 ```
-/
-  bbq-thermometer.ino   (or main.cpp for PlatformIO)
+arduino/bbq-thermometer/
+  bbq-thermometer.ino   Main sketch (PlatformIO builds it directly)
   thermistor.h          Steinhart-Hart conversion
   logger.h              SD card logging
   websocket_handler.h   WebSocket push logic
 ```
+
+The full file list is in [`arduino/FIRMWARE-SPEC.md`](arduino/FIRMWARE-SPEC.md).
 
 ---
 
@@ -360,6 +372,8 @@ Any device on the same WiFi network opens `http://<device-ip>` in a browser. No 
 Gravity: I2C ADS1115 16-Bit ADC Module
 - https://thepihut.com/products/gravity-i2c-ads1115-16-bit-adc-module-arduino-raspberry-pi-compatible
 - Sale price £14.90
+
+Prices below were correct when the parts were bought and may have changed.
 
 Fermion: MicroSD Card Module for Arduino (Breakout)
 - £5
