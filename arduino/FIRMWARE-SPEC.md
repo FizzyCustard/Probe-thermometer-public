@@ -22,6 +22,12 @@ arduino/
     thermistor.h        Steinhart-Hart resistance → temperature + calibration
     logger.h            SD card CSV logging + calibration JSON save/load
     websocket_handler.h WebSocket push and receive (settings + calibration)
+    snapshot.h          Builds the device-state JSON shared by WebSocket and REST
+    api_handler.h       Read-only REST endpoint (GET /api/status)
+    cook_session.h      Active cook state and per-cook CSV files
+    wifi_manager.h      Saved WiFi credentials, STA connect, AP fallback
+    deferred_queue.h    FIFO for WebSocket commands that touch SD or flash
+    net_guards.h        Validation and origin checks for network input (host-testable)
 ```
 
 ---
@@ -33,8 +39,8 @@ Install all via Arduino IDE Library Manager or `platformio.ini`.
 | Library | Author | Purpose |
 |---|---|---|
 | `ESP8266WiFi` | ESP8266 core (built-in) | WiFi connection |
-| `ESPAsyncWebServer` | Me-No-Dev | Async HTTP + WebSocket server |
-| `ESPAsyncTCP` | Me-No-Dev | Required by ESPAsyncWebServer |
+| `ESPAsyncWebServer` | ESP32Async | Async HTTP + WebSocket server |
+| `ESPAsyncTCP` | ESP32Async | Required by ESPAsyncWebServer |
 | `Adafruit ADS1X15` | Adafruit | ADS1115 I2C ADC driver |
 | `ArduinoJson` | Bblanchon | JSON serialisation for WebSocket payloads |
 | `SD` | Arduino (built-in) | SD card read/write |
@@ -42,11 +48,12 @@ Install all via Arduino IDE Library Manager or `platformio.ini`.
 | `NTPClient` | Fabrice Weinberg | NTP time sync over WiFi |
 | `WiFiUdp` | ESP8266 core (built-in) | Required by NTPClient |
 
-> **Note:** ESPAsyncWebServer and ESPAsyncTCP are not in the standard Library
-> Manager. PlatformIO installs them from GitHub via `lib_deps` in
-> `platformio.ini`. In the Arduino IDE, install them manually from:
-> - https://github.com/me-no-dev/ESPAsyncWebServer
-> - https://github.com/me-no-dev/ESPAsyncTCP
+> **Note:** PlatformIO installs the versions allowed by `lib_deps` in
+> `platformio.ini`. ESPAsyncWebServer and ESPAsyncTCP come from the maintained
+> ESP32Async forks (the original me-no-dev repos are archived). In the Arduino
+> IDE, install them from:
+> - https://github.com/ESP32Async/ESPAsyncWebServer
+> - https://github.com/ESP32Async/ESPAsyncTCP
 
 ---
 
@@ -56,10 +63,13 @@ Copy `config.example.h` to `config.h` before flashing. The file is
 gitignored so WiFi credentials are never committed.
 
 Key values to set:
-- `WIFI_SSID` / `WIFI_PASSWORD`
+- `OTA_PASSWORD` and `AP_PASSWORD` — required; the build fails while either is
+  still `CHANGE_ME`
+- `WIFI_SSID` / `WIFI_PASSWORD` — optional; WiFi can also be set up from the
+  web UI in AP mode
 - `NTP_UTC_OFFSET_SEC` (e.g. `3600` for GMT+1)
-- `PROBE1_SH_A/B/C` and `PROBE2_SH_A/B/C` — Steinhart-Hart defaults
-  (overridden at runtime when calibration data is saved to SD)
+- `PROBE0_SH_A/B/C` (meat) and `PROBE1_SH_A/B/C` (grill) — Steinhart-Hart
+  defaults (overridden at runtime when calibration data is saved to SD)
 
 ---
 
@@ -127,7 +137,7 @@ where `V_adc = (raw_counts / 32767) × 4.096` (ADS1115 GAIN_ONE).
 
 `SHCoeffs probeCoeffs[2]` holds A/B/C for both probes. Populated from
 `config.h` defaults on boot; overwritten when `loadCalibration()` finds
-`/calibration.json` on the SD card.
+`/BBQ/config/calibration.json` on the SD card.
 
 ### Coefficient Calculation
 
@@ -166,11 +176,11 @@ Run the calibration tool for probe-specific accuracy.
 
 ### Temperature CSV
 
-- File: `/log_YYYY-MM-DD.csv` — new file per calendar day
-- Written every 5 seconds
-- Format: `timestamp,probe1_c,probe2_c`
+- File: `/BBQ/logs/log_YYYY-MM-DD.csv` — new file per calendar day
+- Written every 5 seconds, once NTP time is valid (not in AP mode)
+- Format: `timestamp,meat_c,grill_c`
 
-### Calibration JSON (`/calibration.json`)
+### Calibration JSON (`/BBQ/config/calibration.json`)
 
 Saved and loaded by the logger. Format:
 
@@ -205,9 +215,18 @@ file exists it overwrites `probeCoeffs[]` with the saved values.
   "grill": { "c": 182.3, "r": 612 },
   "meat_target": 74.0,
   "grill_low":   160.0,
-  "grill_high":  200.0
+  "grill_high":  200.0,
+  "sd":   true,
+  "heap": 21456,
+  "cook_active": false,
+  "rssi": -61
 }
 ```
+
+Built by `buildSnapshot()` in `snapshot.h`, which `GET /api/status` also uses.
+During a cook the targets are the cook's own, and `cook_name`,
+`cook_elapsed_s` and `cook_*` targets are added. In AP mode `rssi` is replaced
+by `"ap_mode": true`.
 
 `r` is the median-of-3 resistance behind `c`, in whole ohms (`null` when the
 probe is disconnected). It is what the calibration wizard watches for
@@ -252,7 +271,7 @@ runs from `wsTick()` in `loop()` because the SD write blocks. There
 | `roundtrip` | a point converts back more than ±3 °C from its reference |
 
 A probe that passes is applied to `probeCoeffs[]` at once and recorded in
-`probeCal[]`; then `saveCalibrationFile()` rewrites `/calibration.json` from
+`probeCal[]`; then `saveCalibrationFile()` rewrites `/BBQ/config/calibration.json` from
 RAM in a single write. The reply carries one result per probe:
 
 ```json
@@ -314,12 +333,13 @@ The collapsed header shows per-probe status from the `config` message:
 
 1. Start Serial (115200 baud)
 2. Mount LittleFS — serve web UI files
-3. Connect to WiFi — block until connected, print IP to Serial
-4. Sync time via NTP
-5. Initialise ADS1115 over I2C
-6. `loggerBegin()` — mount SD card
-7. `loadCalibration()` — load saved coefficients from SD if present
-8. `wsBegin(&server)` — register WebSocket endpoint at `/ws`
+3. Connect to WiFi — saved credentials first, then the ones in `config.h`;
+   if both fail, start the `BBQ-Thermometer` setup access point (AP mode)
+4. Sync time via NTP (skipped in AP mode)
+5. Start mDNS and OTA
+6. Initialise ADS1115 over I2C
+7. `loggerBegin()` — mount SD card, then `loadCalibration()` if it mounted
+8. Register the WebSocket endpoint at `/ws` and the REST endpoint
 9. Register static file handler (serves LittleFS for all other routes)
 10. Start server on port 80
 
@@ -372,7 +392,7 @@ line in `platformio.ini` for that run.
 - [x] Implement `wsBroadcast()` JSON serialisation in `websocket_handler.h`
 - [x] Wire up NTP timestamp formatting
 - [x] Web UI: WebSocket live mode
-- [x] Fix iOS keyboard scroll bug (see `BUG-ios-keyboard-scroll.md`)
+- [x] Fix iOS keyboard scroll bug
 - [ ] Test calibration end-to-end with real probes (ice water + boiling water)
 - [ ] Test SD logging over a full cook session
 - [x] Add mDNS (`bbq.local`) and OTA updates

@@ -8,7 +8,7 @@ original bug-audit list has since been fixed or overtaken by the redesign — se
 ## LOW
 
 ### AP mode banner text not actionable
-**File:** `device/data/app.js` (~line 1232)
+**File:** `device/data/app.js` (`setAPModeBanner`)
 "open Settings to connect to WiFi" is ambiguous for a first-time user — it doesn't say where.
 **Fix:** Change banner text to: `"Tap ⚙ Settings below to connect to a WiFi network."`
 

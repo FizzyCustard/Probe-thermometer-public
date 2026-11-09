@@ -195,7 +195,7 @@ when the device is briefly unreachable. Cache-bust on firmware version.
 
 ## 8. Larger changes
 
-### Multiple probe support [cant happen till i upate the hardware right now only 2 probes]
+### Multiple probe support (needs a hardware revision — the current build has 2 probes)
 Firmware, wiring and UI all hardcode exactly two probes. The ADS1115 has two
 spare channels (A2, A3) and the case has room for two more jacks. Rendering N
 probe cards from a config array, and generalising the tick payload, would

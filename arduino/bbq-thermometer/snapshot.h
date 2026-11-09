@@ -12,7 +12,7 @@
 // the 1 s WebSocket tick (wsBroadcast, websocket_handler.h) and the REST
 // endpoint (GET /api/status, api_handler.h).
 //
-// Keeping one builder is deliberate. The bug fixed in 7bb1647 came from two
+// Keeping one builder is deliberate. An earlier bug came from two
 // independent sources of truth for the same value — the tick reported the
 // persisted globals while the cook record held its own targets — so a second
 // payload builder for REST would recreate exactly that hazard.

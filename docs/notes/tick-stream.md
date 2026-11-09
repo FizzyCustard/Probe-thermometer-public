@@ -44,10 +44,11 @@ what the UI and any monitoring client need. Either:
 User changed the global setting to 95, which synced the tick stream — but the
 active cook record still says 90, so the app UI and tick stream can still disagree.
 
-## Suggested permanent fix (watcher side, already discussed)
+## Suggested permanent fix (client side)
 
-Prefer `cook_meat_target` from the `config` message over `meat_target` in ticks
-when a cook is active. Not yet implemented in `bbq_watch.py`.
+External watchers should prefer `cook_meat_target` over `meat_target` when a
+cook is active. (The firmware fix below also makes `meat_target` report the
+cook's target during a cook.)
 
 ## Secondary observation
 
