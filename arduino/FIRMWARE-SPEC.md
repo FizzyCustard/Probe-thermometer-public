@@ -48,7 +48,7 @@ Install all via Arduino IDE Library Manager or `platformio.ini`.
 | `NTPClient` | Fabrice Weinberg | NTP time sync over WiFi |
 | `WiFiUdp` | ESP8266 core (built-in) | Required by NTPClient |
 
-> **Note:** PlatformIO installs the pinned versions listed in `lib_deps` in
+> **Note:** PlatformIO installs the versions allowed by `lib_deps` in
 > `platformio.ini`. ESPAsyncWebServer and ESPAsyncTCP come from the maintained
 > ESP32Async forks (the original me-no-dev repos are archived). In the Arduino
 > IDE, install them from:
